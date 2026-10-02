@@ -1,0 +1,166 @@
+[
+  {
+    "call_uuid": "test_call_9921",
+    "from": "+919876543210",
+    "to": "+917965853227",
+    "status": "playing_response",
+    "start_time_iso": "2026-09-23 14:38:27",
+    "start_time_ts": 1790154507.136838,
+    "dtmf_digit": "1",
+    "audio_played": "welcome.wav -> audio_1.wav",
+    "cost_breakdown": {
+      "duration_seconds": 12.01,
+      "billable_pulses_minutes": 1,
+      "vobiz_telecom_cost_inr": 0.45,
+      "ai_stt_cost_inr": 0.0,
+      "ai_llm_cost_inr": 0.0,
+      "ai_tts_cost_inr": 0.0,
+      "total_cost_inr": 0.45,
+      "savings_vs_full_ai_inr": 2.55
+    },
+    "dtmf_timestamp_iso": "2026-09-23 14:38:29"
+  },
+  {
+    "call_uuid": "vobiz_call_sample_101",
+    "from": "+917965853227",
+    "to": "+919876543210",
+    "status": "completed",
+    "start_time_iso": "2026-09-23 14:39:39",
+    "start_time_ts": 1790154579.566556,
+    "dtmf_digit": "1",
+    "audio_played": "welcome.wav -> audio_1.wav",
+    "cost_breakdown": {
+      "duration_seconds": 22.0,
+      "billable_pulses_minutes": 1,
+      "vobiz_telecom_cost_inr": 0.45,
+      "ai_stt_cost_inr": 0.0,
+      "ai_llm_cost_inr": 0.0,
+      "ai_tts_cost_inr": 0.0,
+      "total_cost_inr": 0.45,
+      "savings_vs_full_ai_inr": 2.55
+    },
+    "dtmf_timestamp_iso": "2026-09-23 14:39:40",
+    "end_time_iso": "2026-09-23 14:39:40"
+  },
+  {
+    "call_uuid": "SCL_EAK4Bdtk94MA",
+    "from": "+917965853227",
+    "to": "+919980113561",
+    "status": "initiated",
+    "start_time_iso": "2026-09-23 14:44:15",
+    "start_time_ts": 0,
+    "dtmf_digit": "Pending",
+    "audio_played": "LiveKit SIP -> Vobiz Trunk ST_z4V2wYPm5ar3",
+    "cost_breakdown": {
+      "duration_seconds": 30.0,
+      "billable_pulses_minutes": 1,
+      "vobiz_telecom_cost_inr": 0.45,
+      "ai_stt_cost_inr": 0.0,
+      "ai_llm_cost_inr": 0.0,
+      "ai_tts_cost_inr": 0.0,
+      "total_cost_inr": 0.45,
+      "savings_vs_full_ai_inr": 2.55
+    }
+  },
+  {
+    "call_uuid": "SCL_7w4oZ5NQcdtX",
+    "from": "+917965853227",
+    "to": "+919980113561",
+    "status": "completed",
+    "start_time_iso": "2026-09-23 14:47:36",
+    "start_time_ts": 1790155056.8361964,
+    "dtmf_digit": "2",
+    "audio_played": "welcome.wav -> audio_2.wav",
+    "cost_breakdown": {
+      "duration_seconds": 19.12,
+      "billable_pulses_minutes": 1,
+      "vobiz_telecom_cost_inr": 0.45,
+      "ai_stt_cost_inr": 0.0,
+      "ai_llm_cost_inr": 0.0,
+      "ai_tts_cost_inr": 0.0,
+      "total_cost_inr": 0.45,
+      "savings_vs_full_ai_inr": 2.55
+    }
+  },
+  {
+    "call_uuid": "SCL_FzZ9ss6Ue4nc",
+    "from": "+917965853227",
+    "to": "+919980113561",
+    "status": "completed",
+    "start_time_iso": "2026-09-23 14:51:20",
+    "start_time_ts": 1790155280.8839989,
+    "dtmf_digit": "None",
+    "audio_played": "welcome.wav -> timeout.wav",
+    "cost_breakdown": {
+      "duration_seconds": 19.49,
+      "billable_pulses_minutes": 1,
+      "vobiz_telecom_cost_inr": 0.45,
+      "ai_stt_cost_inr": 0.0,
+      "ai_llm_cost_inr": 0.0,
+      "ai_tts_cost_inr": 0.0,
+      "total_cost_inr": 0.45,
+      "savings_vs_full_ai_inr": 2.55
+    }
+  },
+  {
+    "call_uuid": "SCL_GSQFKi5v9V2z",
+    "from": "+917965853227",
+    "to": "+919980113561",
+    "status": "completed",
+    "start_time_iso": "2026-09-23 14:53:34",
+    "start_time_ts": 1790155414.2838545,
+    "dtmf_digit": "2",
+    "audio_played": "welcome.wav -> audio_2.wav",
+    "cost_breakdown": {
+      "duration_seconds": 17.22,
+      "billable_pulses_minutes": 1,
+      "vobiz_telecom_cost_inr": 0.45,
+      "ai_stt_cost_inr": 0.0,
+      "ai_llm_cost_inr": 0.0,
+      "ai_tts_cost_inr": 0.0,
+      "total_cost_inr": 0.45,
+      "savings_vs_full_ai_inr": 2.55
+    }
+  },
+  {
+    "call_uuid": "SCL_6cgjeVLYouGu",
+    "from": "+917965853227",
+    "to": "+919980113561",
+    "status": "completed",
+    "start_time_iso": "2026-09-23 14:55:16",
+    "start_time_ts": 1790155516.0650418,
+    "dtmf_digit": "1",
+    "audio_played": "welcome.wav -> audio_1.wav",
+    "cost_breakdown": {
+      "duration_seconds": 18.24,
+      "billable_pulses_minutes": 1,
+      "vobiz_telecom_cost_inr": 0.45,
+      "ai_stt_cost_inr": 0.0,
+      "ai_llm_cost_inr": 0.0,
+      "ai_tts_cost_inr": 0.0,
+      "total_cost_inr": 0.45,
+      "savings_vs_full_ai_inr": 2.55
+    }
+  },
+  {
+    "call_uuid": "1f5e5f0e-ece8-417b-b0e6-0707270b9e67",
+    "from": "+917965853227",
+    "to": "+919980113561",
+    "status": "completed",
+    "start_time_iso": "2026-09-23 19:36:58",
+    "start_time_ts": 1790172418.8151772,
+    "dtmf_digit": "1",
+    "audio_played": "welcome.wav -> audio_1.wav",
+    "cost_breakdown": {
+      "duration_seconds": 33.78,
+      "billable_pulses_minutes": 1,
+      "vobiz_telecom_cost_inr": 0.45,
+      "billing_source": "Live Vobiz Carrier Ledger",
+      "ai_stt_cost_inr": 0.0,
+      "ai_llm_cost_inr": 0.0,
+      "ai_tts_cost_inr": 0.0,
+      "total_cost_inr": 0.45,
+      "savings_vs_full_ai_inr": 2.55
+    }
+  }
+]

@@ -1,0 +1,10 @@
+﻿Date & Time,Call UUID,From (Caller),To (Destination),DTMF Key Pressed,Audio Flow Played,Duration (Sec),Billable Minutes,Vobiz Telecom Cost (INR),Live STT Cost (INR),Live LLM Cost (INR),Live TTS Cost (INR),Total Cost (INR),Client Savings vs Full AI (INR)
+2026-09-23 14:38:27,test_call_9921,+919876543210,+917965853227,1,welcome.wav -> audio_1.wav,12.01,1,0.45,0.00,0.00,0.00,0.45,2.55
+2026-09-23 14:39:39,vobiz_call_sample_101,+917965853227,+919876543210,1,welcome.wav -> audio_1.wav,22.0,1,0.45,0.00,0.00,0.00,0.45,2.55
+2026-09-23 14:44:15,SCL_EAK4Bdtk94MA,+917965853227,+919980113561,Pending,LiveKit SIP -> Vobiz Trunk ST_z4V2wYPm5ar3,30.0,1,0.45,0.00,0.00,0.00,0.45,2.55
+2026-09-23 14:47:36,SCL_7w4oZ5NQcdtX,+917965853227,+919980113561,2,welcome.wav -> audio_2.wav,19.12,1,0.45,0.00,0.00,0.00,0.45,2.55
+2026-09-23 14:51:20,SCL_FzZ9ss6Ue4nc,+917965853227,+919980113561,None,welcome.wav -> timeout.wav,19.49,1,0.45,0.00,0.00,0.00,0.45,2.55
+2026-09-23 14:53:34,SCL_GSQFKi5v9V2z,+917965853227,+919980113561,2,welcome.wav -> audio_2.wav,17.22,1,0.45,0.00,0.00,0.00,0.45,2.55
+2026-09-23 14:55:16,SCL_6cgjeVLYouGu,+917965853227,+919980113561,1,welcome.wav -> audio_1.wav,18.24,1,0.45,0.00,0.00,0.00,0.45,2.55
+2026-09-23 19:36:58,1f5e5f0e-ece8-417b-b0e6-0707270b9e67,+917965853227,+919980113561,1,welcome.wav -> audio_1.wav,33.78,1,0.45,0.00,0.00,0.00,0.45,2.55
+TOTAL / SUMMARY,8 Calls,-,-,-,-,171.86,8,3.6,0.0,0.0,0.0,3.6,20.4
