@@ -1,0 +1,484 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Admin Telephony & Financial Control Center</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-color: #faf9f6;
+            --primary: #db8b70;
+            --primary-hover: #c9795e;
+            --primary-tint: #db8b701a;
+            --surface-warm: #f7eae3;
+            --surface-card: #ffffff;
+            --card-border: #eee7e1;
+            --text-main: #2b2320;
+            --text-muted: #7d726d;
+            --success: #16a34a;
+            --success-tint: rgba(22, 163, 74, 0.1);
+            --danger: #dc2626;
+            --danger-tint: rgba(220, 38, 38, 0.1);
+            --radius-md: 12px;
+            --radius-lg: 16px;
+            --shadow-subtle: 0 4px 20px rgba(43, 35, 32, 0.05);
+        }
+
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+
+        body {
+            font-family: 'Plus Jakarta Sans', sans-serif;
+            background: var(--bg-color);
+            color: var(--text-main);
+            min-height: 100vh;
+            padding: 28px;
+        }
+
+        .container { max-width: 1320px; margin: 0 auto; }
+
+        header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            background: var(--surface-card);
+            border: 1px solid var(--card-border);
+            padding: 20px 28px;
+            border-radius: var(--radius-lg);
+            margin-bottom: 24px;
+            box-shadow: var(--shadow-subtle);
+        }
+
+        .brand-wrap { display: flex; align-items: center; gap: 16px; }
+        .brand-icon {
+            width: 48px; height: 48px;
+            background: var(--primary-tint);
+            border: 1px solid var(--primary);
+            border-radius: 12px;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 24px;
+        }
+
+        .admin-badge {
+            background: var(--danger-tint);
+            border: 1px solid var(--danger);
+            color: var(--danger);
+            padding: 6px 14px;
+            border-radius: 999px;
+            font-size: 13px;
+            font-weight: 700;
+            letter-spacing: 0.5px;
+            text-transform: uppercase;
+        }
+
+        .live-pulse {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            background: var(--success-tint);
+            color: var(--success);
+            padding: 6px 14px;
+            border-radius: 999px;
+            font-size: 12px;
+            font-weight: 700;
+        }
+
+        .pulse-dot {
+            width: 8px;
+            height: 8px;
+            background: var(--success);
+            border-radius: 50%;
+            animation: pulse 1.5s infinite;
+        }
+
+        @keyframes pulse {
+            0% { transform: scale(0.95); opacity: 0.8; }
+            50% { transform: scale(1.3); opacity: 1; }
+            100% { transform: scale(0.95); opacity: 0.8; }
+        }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 18px;
+            margin-bottom: 24px;
+        }
+
+        .stat-card {
+            background: var(--surface-card);
+            border: 1px solid var(--card-border);
+            padding: 22px;
+            border-radius: var(--radius-md);
+            position: relative;
+            box-shadow: var(--shadow-subtle);
+        }
+
+        .stat-card::after {
+            content: '';
+            position: absolute;
+            top: 0; left: 0;
+            width: 4px; height: 100%;
+            background: var(--primary);
+        }
+
+        .stat-label {
+            font-size: 12px;
+            text-transform: uppercase;
+            letter-spacing: 0.8px;
+            color: var(--text-muted);
+            margin-bottom: 6px;
+            font-weight: 700;
+        }
+
+        .stat-value {
+            font-size: 28px;
+            font-weight: 800;
+            font-family: 'JetBrains Mono', monospace;
+            color: var(--text-main);
+        }
+
+        .layout-two-col {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+            margin-bottom: 24px;
+        }
+
+        .card {
+            background: var(--surface-card);
+            border: 1px solid var(--card-border);
+            border-radius: var(--radius-lg);
+            padding: 26px;
+            box-shadow: var(--shadow-subtle);
+        }
+
+        .card-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 18px;
+        }
+
+        .card-header h2 { font-size: 17px; font-weight: 700; color: var(--text-main); }
+
+        .btn {
+            background: var(--primary);
+            color: #fff;
+            border: none;
+            padding: 11px 20px;
+            border-radius: 8px;
+            font-weight: 700;
+            font-size: 14px;
+            cursor: pointer;
+            transition: all 0.2s;
+            box-shadow: 0 4px 12px rgba(219, 139, 112, 0.25);
+        }
+
+        .btn:hover { background: var(--primary-hover); }
+
+        .btn-outline {
+            background: var(--surface-card);
+            color: var(--text-main);
+            border: 1.5px solid var(--primary);
+            box-shadow: none;
+        }
+
+        .btn-outline:hover { background: var(--primary-tint); }
+
+        .input-group { margin-bottom: 16px; }
+        .input-group label { display: block; font-size: 13px; font-weight: 600; color: var(--text-muted); margin-bottom: 6px; }
+        .input-group input {
+            width: 100%;
+            background: var(--bg-color);
+            border: 1px solid var(--card-border);
+            border-radius: 8px;
+            padding: 10px 14px;
+            color: var(--text-main);
+            font-size: 14px;
+            outline: none;
+            font-weight: 600;
+        }
+
+        .table-wrap { overflow-x: auto; margin-top: 14px; }
+        table { width: 100%; border-collapse: collapse; font-size: 13px; }
+        th { background: var(--bg-color); color: var(--text-muted); text-align: left; padding: 12px 14px; font-weight: 700; border-bottom: 1.5px solid var(--card-border); text-transform: uppercase; font-size: 11px; }
+        td { padding: 12px 14px; border-bottom: 1px solid var(--card-border); color: var(--text-main); }
+
+        .toast {
+            position: fixed; bottom: 24px; right: 24px;
+            background: var(--surface-card); border: 1.5px solid var(--primary);
+            padding: 14px 22px; border-radius: var(--radius-md);
+            color: var(--text-main); display: none; z-index: 9999;
+            box-shadow: 0 10px 30px rgba(43, 35, 32, 0.15);
+            font-weight: 600;
+        }
+
+        @media (max-width: 900px) {
+            .stats-grid, .layout-two-col { grid-template-columns: 1fr; }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- Admin Header -->
+        <header>
+            <div class="brand-wrap">
+                <div class="brand-icon">🛡️</div>
+                <div>
+                    <h1 style="font-size:20px; font-weight:800; color:var(--text-main);">Admin Telephony & Financial Dashboard</h1>
+                    <p style="color:var(--text-muted); font-size:13px; margin-top:2px;">Real-time balance fetched live from Vobiz carrier account & client credit quota</p>
+                </div>
+            </div>
+
+            <div style="display:flex; align-items:center; gap:16px;">
+                <div class="live-pulse">
+                    <span class="pulse-dot"></span>
+                    <span>Live Syncing</span>
+                </div>
+                <span class="admin-badge">Admin Access</span>
+                <a href="/" style="color:var(--primary); font-size:13px; text-decoration:none; font-weight:700;">Switch to User View →</a>
+            </div>
+        </header>
+
+        <!-- Top Carrier Financial Metrics -->
+        <div class="stats-grid">
+            <div class="stat-card">
+                <div class="stat-label">Live Vobiz Account Balance</div>
+                <div class="stat-value" id="adminVobizBalance" style="color:var(--primary);">₹...</div>
+                <div style="font-size:12px; color:var(--text-muted); margin-top:4px;">Fetched live from api.vobiz.ai</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">Total Calls in Vobiz Ledger</div>
+                <div class="stat-value" id="adminTotalCalls">0</div>
+                <div style="font-size:12px; color:var(--text-muted); margin-top:4px;">Direct from Vobiz CDR</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">Total Carrier Spend Billed</div>
+                <div class="stat-value" id="adminActualVobizCost" style="color:var(--danger);">₹0.00</div>
+                <div style="font-size:12px; color:var(--text-muted); margin-top:4px;">Wholesale carrier charge</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">Client Credits Remaining</div>
+                <div class="stat-value" id="adminClientCredits" style="color:var(--success);">30,000</div>
+                <div style="font-size:12px; color:var(--text-muted); margin-top:4px;">Client campaign quota</div>
+            </div>
+        </div>
+
+        <div class="layout-two-col">
+            <!-- Vobiz Carrier Status Card -->
+            <div class="card">
+                <div class="card-header">
+                    <h2>💼 Live Vobiz Carrier Account</h2>
+                    <span style="background:var(--success-tint); color:var(--success); padding:4px 10px; border-radius:6px; font-size:12px; font-weight:700;" id="connStatusBadge">Vobiz API Live</span>
+                </div>
+
+                <div style="background:var(--bg-color); padding:18px; border-radius:12px; margin-bottom:18px; border:1px solid var(--card-border);">
+                    <div style="display:flex; justify-content:space-between; margin-bottom:12px;">
+                        <span style="color:var(--text-muted); font-size:13px; font-weight:600;">Account Balance:</span>
+                        <strong style="color:var(--primary); font-size:22px; font-family:'JetBrains Mono';" id="adminVobizBalanceText">₹...</strong>
+                    </div>
+                    <div style="display:flex; justify-content:space-between; margin-bottom:12px;">
+                        <span style="color:var(--text-muted); font-size:13px; font-weight:600;">Account Holder:</span>
+                        <span id="adminAccountName" style="color:var(--text-main); font-weight:700;">AMMAR RAZA</span>
+                    </div>
+                    <div style="display:flex; justify-content:space-between; margin-bottom:12px;">
+                        <span style="color:var(--text-muted); font-size:13px; font-weight:600;">Pricing Tier (Plan):</span>
+                        <span id="adminTierName" style="color:var(--text-main); font-weight:700;">Base Tier - New - KYC</span>
+                    </div>
+                    <div style="display:flex; justify-content:space-between; margin-bottom:12px;">
+                        <span style="color:var(--text-muted); font-size:13px; font-weight:600;">Wholesale Carrier Rate:</span>
+                        <span id="adminWholesaleRate" style="color:var(--text-main); font-weight:700;">₹0.45 / minute</span>
+                    </div>
+                    <div style="display:flex; justify-content:space-between; margin-bottom:12px;">
+                        <span style="color:var(--text-muted); font-size:13px; font-weight:600;">Auth ID:</span>
+                        <span id="adminAuthId" style="color:var(--text-main); font-family:monospace; font-weight:600;">MA_SB41BBZ8</span>
+                    </div>
+                    <div style="display:flex; justify-content:space-between;">
+                        <span style="color:var(--text-muted); font-size:13px; font-weight:600;">Outbound Caller ID (DID):</span>
+                        <span id="adminCallerId" style="color:var(--primary); font-family:monospace; font-weight:700;">+917965853227</span>
+                    </div>
+                </div>
+
+                <button class="btn btn-outline" style="width:100%;" onclick="fetchVobizInfo()">
+                    <span>🔄</span> Fetch Latest Vobiz Balance Now
+                </button>
+            </div>
+
+            <!-- Credit Allocation for User -->
+            <div class="card">
+                <div class="card-header">
+                    <h2>🪙 Client Quota & Credit Allocator</h2>
+                    <span style="font-size:12px; color:var(--text-muted); font-weight:600;">Manage client quota</span>
+                </div>
+
+                <p style="font-size:13px; color:var(--text-muted); margin-bottom:16px;">
+                    Allocate or replenish call credits for the user account (e.g. 30,000 credits to call up to 30,000 members).
+                </p>
+
+                <div class="input-group">
+                    <label>Current Client Balance:</label>
+                    <div style="font-size:24px; font-weight:800; font-family:'JetBrains Mono'; color:var(--success); margin-bottom:10px;" id="clientCreditsDisplay">
+                        30,000 Credits
+                    </div>
+                </div>
+
+                <div class="input-group">
+                    <label>Set Exact Credit Amount:</label>
+                    <div style="display:flex; gap:10px;">
+                        <input type="number" id="inputCreditAmount" value="30000" min="1" step="1000">
+                        <button class="btn" onclick="setCredits()">Set Credits</button>
+                    </div>
+                </div>
+
+                <div style="display:flex; gap:10px; margin-top:14px;">
+                    <button class="btn btn-outline" onclick="addCredits(10000)">+10,000 Credits</button>
+                    <button class="btn btn-outline" onclick="addCredits(30000)">+30,000 Credits</button>
+                    <button class="btn btn-outline" onclick="setCreditsExact(0)" style="color:var(--danger); border-color:var(--danger);">Reset to 0</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Live Vobiz Carrier CDR Table -->
+        <div class="card">
+            <div class="card-header">
+                <h2>📋 Live Vobiz Carrier CDR Records (Direct from Carrier API)</h2>
+                <button class="btn btn-outline" style="padding:6px 14px; font-size:12px;" onclick="fetchVobizInfo()">🔄 Refresh CDR</button>
+            </div>
+            <div class="table-wrap">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Call UUID</th>
+                            <th>Caller (From)</th>
+                            <th>Destination (To)</th>
+                            <th>Carrier Duration</th>
+                            <th>Wholesale Cost</th>
+                            <th>Hangup Cause</th>
+                            <th>Timestamp</th>
+                        </tr>
+                    </thead>
+                    <tbody id="vobizCdrTableBody">
+                        <tr><td colspan="7" style="text-align:center; padding:20px; color:var(--text-muted);">Loading live carrier records...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <div class="toast" id="toastBox">
+        <span id="toastMsg">Notification</span>
+    </div>
+
+    <script>
+        function showToast(msg) {
+            const toast = document.getElementById('toastBox');
+            document.getElementById('toastMsg').innerText = msg;
+            toast.style.display = 'block';
+            setTimeout(() => { toast.style.display = 'none'; }, 3000);
+        }
+
+        async function fetchVobizInfo() {
+            try {
+                const res = await fetch('/api/vobiz/account');
+                const data = await res.json();
+
+                // Live balance DIRECT FROM VOBIZ API
+                const liveCashCredits = data.cash_credits || '0.00';
+                const totalSpent = data.total_spent_inr != null ? data.total_spent_inr : 0.0;
+
+                document.getElementById('adminVobizBalance').innerText = `₹${liveCashCredits}`;
+                document.getElementById('adminVobizBalanceText').innerText = `₹${liveCashCredits}`;
+                document.getElementById('adminActualVobizCost').innerText = `₹${totalSpent.toFixed(2)}`;
+                document.getElementById('adminTotalCalls').innerText = (data.total_calls || 0).toLocaleString();
+                document.getElementById('adminAccountName').innerText = data.account_name || 'AMMAR RAZA';
+                document.getElementById('adminTierName').innerText = data.pricing_tier_name || 'Base Tier - New - KYC';
+                document.getElementById('adminWholesaleRate').innerText = `₹${data.wholesale_rate || '0.4500'} / min (${data.billing_increment_sec || 60}s pulse)`;
+                document.getElementById('adminCallerId').innerText = data.caller_id || '+917965853227';
+                document.getElementById('adminAuthId').innerText = data.auth_id || 'MA_SB41BBZ8';
+
+                // Render live CDR
+                renderVobizCdr(data.recent_calls || []);
+
+            } catch (e) {
+                console.error("Vobiz fetch error:", e);
+            }
+        }
+
+        function renderVobizCdr(calls) {
+            const tbody = document.getElementById('vobizCdrTableBody');
+            if (!calls || calls.length === 0) {
+                tbody.innerHTML = `<tr><td colspan="7" style="text-align:center; padding:20px; color:var(--text-muted);">No carrier calls recorded in Vobiz CDR yet.</td></tr>`;
+                return;
+            }
+
+            let html = '';
+            calls.forEach(c => {
+                html += `
+                    <tr>
+                        <td style="font-family:'JetBrains Mono'; font-size:12px; color:var(--text-muted);">${(c.call_uuid || '').slice(0, 14)}...</td>
+                        <td>${c.from_number || '—'}</td>
+                        <td style="font-family:'JetBrains Mono'; font-weight:700;">${c.to_number || '—'}</td>
+                        <td>${c.duration}s</td>
+                        <td style="font-family:'JetBrains Mono'; font-weight:700; color:var(--danger);">₹${c.cost.toFixed(2)}</td>
+                        <td><span style="background:var(--primary-tint); color:var(--primary); padding:3px 8px; border-radius:4px; font-size:11px; font-weight:700;">${c.hangup_cause}</span></td>
+                        <td style="color:var(--text-muted); font-size:12px;">${c.time || '—'}</td>
+                    </tr>
+                `;
+            });
+            tbody.innerHTML = html;
+        }
+
+        async function fetchClientStats() {
+            try {
+                const res = await fetch('/api/campaign/1/status');
+                const data = await res.json();
+                const creds = data.credits != null ? data.credits : 30000;
+                document.getElementById('adminClientCredits').innerText = creds.toLocaleString();
+                document.getElementById('clientCreditsDisplay').innerText = `${creds.toLocaleString()} Credits`;
+            } catch (e) {
+                console.error(e);
+            }
+        }
+
+        async function setCredits() {
+            const val = parseInt(document.getElementById('inputCreditAmount').value);
+            if (!val || val < 0) return;
+            await fetch(`/api/account/credits`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ credits: val })
+            });
+            showToast(`Client credits set to ${val.toLocaleString()}`);
+            fetchClientStats();
+        }
+
+        async function setCreditsExact(amount) {
+            await fetch(`/api/account/credits`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ credits: amount })
+            });
+            showToast(`Credits reset to 0`);
+            fetchClientStats();
+        }
+
+        async function addCredits(amount) {
+            await fetch(`/api/account/credits/add`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ amount: amount })
+            });
+            showToast(`Added ${amount.toLocaleString()} credits!`);
+            fetchClientStats();
+        }
+
+        // Fetch immediately and poll every 2.5 seconds continuously
+        fetchVobizInfo();
+        fetchClientStats();
+        setInterval(fetchVobizInfo, 2500);
+        setInterval(fetchClientStats, 2500);
+    </script>
+</body>
+</html>

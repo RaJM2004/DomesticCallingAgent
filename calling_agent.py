@@ -6,349 +6,594 @@ if hasattr(sys.stdout, "reconfigure"):
         pass
 
 import os
+import io
+import csv
 import json
 import time
 import math
 from datetime import datetime
 from pathlib import Path
 from dotenv import load_dotenv
-from fastapi import FastAPI, Request, Response
-from fastapi.responses import HTMLResponse, JSONResponse, FileResponse
+from fastapi import FastAPI, Request, Response, UploadFile, File, Depends, HTTPException
+from fastapi.responses import HTMLResponse, JSONResponse, FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
+from fastapi.templating import Jinja2Templates
+from pydantic import BaseModel
 import uvicorn
 import openpyxl
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
-from openpyxl.utils import get_column_letter
+from sqlalchemy.orm import Session
+
+from database import init_db, get_db, SessionLocal, Account, Campaign, CallRecord
+from dialer_engine import start_campaign_dialer, pause_campaign_dialer, stop_campaign_dialer
+from vobiz_service import get_vobiz_account_details
 
 load_dotenv()
 
-app = FastAPI(title="Vobiz DTMF Calling Agent & Cost Logger")
+# Initialize DB tables and seed default accounts
+init_db()
 
-# Directories and file paths
+app = FastAPI(title="Vobiz Automated Calling & Response Tracker")
+
+# Directories
 BASE_DIR = Path(__file__).parent
 AUDIO_DIR = BASE_DIR / "audio"
 AUDIO_DIR.mkdir(exist_ok=True)
-LOGS_FILE = BASE_DIR / "call_logs.json"
-EXCEL_FILE = BASE_DIR / "call_billing_log.xlsx"
+TEMPLATES_DIR = BASE_DIR / "templates"
+EXPORTS_DIR = BASE_DIR / "exports"
+EXPORTS_DIR.mkdir(exist_ok=True)
 
-# Mount audio directory to serve static audio files directly
+# Mount audio directory
 app.mount("/audio", StaticFiles(directory=str(AUDIO_DIR)), name="audio")
 
 SERVER_BASE_URL = os.getenv("SERVER_BASE_URL", "http://localhost:8000").rstrip("/")
 VOBIZ_PER_MINUTE_RATE = float(os.getenv("VOBIZ_PER_MINUTE_RATE", 0.45))  # INR 0.45 carrier rate
-
-# In-memory store for active calls
-active_calls = {}
+VOBIZ_OUTBOUND_NUMBER = os.getenv("VOBIZ_OUTBOUND_NUMBER", "+917965853227")
 
 
-def load_logs() -> list:
-    if LOGS_FILE.exists():
+# Pydantic models
+class CreditUpdateModel(BaseModel):
+    credits: float
+
+class CreditAddModel(BaseModel):
+    amount: float
+
+class WalletRechargeModel(BaseModel):
+    amount: float
+
+
+# ==========================================
+# 1. FRONTEND DASHBOARDS (SEPARATE USER & ADMIN)
+# ==========================================
+@app.get("/", response_class=HTMLResponse)
+def user_portal():
+    """Client / User Interface: Upload 30k numbers, auto-dialer, credit view, response logs."""
+    html_file = TEMPLATES_DIR / "user.html"
+    if html_file.exists():
+        with open(html_file, "r", encoding="utf-8") as f:
+            return f.read()
+    return "<h1>User portal template not found.</h1>"
+
+
+@app.get("/admin", response_class=HTMLResponse)
+def admin_portal():
+    """Dedicated Admin Panel: Vobiz wholesale balance, carrier cost ledger, client credit allocation."""
+    html_file = TEMPLATES_DIR / "admin.html"
+    if html_file.exists():
+        with open(html_file, "r", encoding="utf-8") as f:
+            return f.read()
+    return "<h1>Admin portal template not found.</h1>"
+
+
+
+# ==========================================
+# 2. EXCEL / CSV UPLOAD (Handles 30,000+ numbers)
+# ==========================================
+@app.post("/api/campaign/upload")
+async def upload_campaign_file(
+    file: UploadFile = File(...),
+    course_type: str = "bca_internship",
+    language: str = "en",
+    db: Session = Depends(get_db)
+):
+    filename = file.filename or "uploaded_numbers"
+    contents = await file.read()
+
+    # Get client account
+    account = db.query(Account).filter(Account.role == "client").first()
+    if not account:
+        account = Account(name="Client Account", role="client", credits=30000)
+        db.add(account)
+        db.commit()
+        db.refresh(account)
+
+    # Create new Campaign
+    campaign_name = f"Campaign - {Path(filename).stem} ({datetime.now().strftime('%d %b %H:%M')})"
+    campaign = Campaign(
+        account_id=account.id,
+        name=campaign_name,
+        file_name=filename,
+        course_type=course_type,
+        language=language,
+        total_numbers=0,
+        status="idle"
+    )
+    db.add(campaign)
+    db.commit()
+    db.refresh(campaign)
+
+    records_to_insert = []
+    
+    # Parse CSV or Excel
+    if filename.lower().endswith(".csv"):
+        text_data = contents.decode("utf-8", errors="ignore")
+        reader = csv.reader(io.StringIO(text_data))
+        headers = next(reader, None)
+        
+        phone_col = 0
+        name_col = None
+        if headers:
+            for idx, h in enumerate(headers):
+                h_clean = h.strip().lower()
+                if any(x in h_clean for x in ["phone", "mobile", "contact", "number", "tel"]):
+                    phone_col = idx
+                elif any(x in h_clean for x in ["name", "customer", "lead", "client"]):
+                    name_col = idx
+
+        for row in reader:
+            if not row or len(row) <= phone_col:
+                continue
+            raw_phone = str(row[phone_col]).strip()
+            if not raw_phone or not any(char.isdigit() for char in raw_phone):
+                continue
+            cust_name = str(row[name_col]).strip() if name_col is not None and len(row) > name_col else ""
+            
+            # Format phone
+            cleaned_phone = raw_phone.replace(" ", "").replace("-", "")
+            if not cleaned_phone.startswith("+"):
+                if len(cleaned_phone) == 10:
+                    cleaned_phone = "+91" + cleaned_phone
+                else:
+                    cleaned_phone = "+" + cleaned_phone
+
+            records_to_insert.append({
+                "campaign_id": campaign.id,
+                "phone_number": cleaned_phone,
+                "customer_name": cust_name,
+                "course_type": course_type,
+                "language": language,
+                "status": "pending",
+                "dtmf_digit": "",
+                "audio_flow": "",
+                "response_note": "Queued",
+                "duration_sec": 0.0,
+                "carrier_cost_inr": 0.0,
+                "created_at": datetime.utcnow()
+            })
+
+    else:
+        # Excel .xlsx / .xls
+        wb = openpyxl.load_workbook(io.BytesIO(contents), read_only=True, data_only=True)
+        ws = wb.active
+        rows = ws.iter_rows(values_only=True)
+        headers = next(rows, None)
+
+        phone_col = 0
+        name_col = None
+        if headers:
+            for idx, h in enumerate(headers):
+                if not h:
+                    continue
+                h_clean = str(h).strip().lower()
+                if any(x in h_clean for x in ["phone", "mobile", "contact", "number", "tel"]):
+                    phone_col = idx
+                elif any(x in h_clean for x in ["name", "customer", "lead", "client"]):
+                    name_col = idx
+
+        for row in rows:
+            if not row or len(row) <= phone_col:
+                continue
+            raw_val = row[phone_col]
+            if raw_val is None:
+                continue
+            raw_phone = str(raw_val).strip().replace(".0", "")
+            if not raw_phone or not any(char.isdigit() for char in raw_phone):
+                continue
+            cust_name = str(row[name_col]).strip() if name_col is not None and len(row) > name_col and row[name_col] else ""
+
+            cleaned_phone = raw_phone.replace(" ", "").replace("-", "")
+            if not cleaned_phone.startswith("+"):
+                if len(cleaned_phone) == 10:
+                    cleaned_phone = "+91" + cleaned_phone
+                else:
+                    cleaned_phone = "+" + cleaned_phone
+
+            records_to_insert.append({
+                "campaign_id": campaign.id,
+                "phone_number": cleaned_phone,
+                "customer_name": cust_name,
+                "course_type": course_type,
+                "language": language,
+                "status": "pending",
+                "dtmf_digit": "",
+                "audio_flow": "",
+                "response_note": "Queued",
+                "duration_sec": 0.0,
+                "carrier_cost_inr": 0.0,
+                "created_at": datetime.utcnow()
+            })
+        wb.close()
+
+    # Bulk insert for speed (up to 30,000+ records)
+    if records_to_insert:
+        db.bulk_insert_mappings(CallRecord, records_to_insert)
+        campaign.total_numbers = len(records_to_insert)
+        db.commit()
+
+    return {
+        "success": True,
+        "campaign_id": campaign.id,
+        "campaign_name": campaign.name,
+        "course_type": campaign.course_type,
+        "language": campaign.language,
+        "total_numbers": len(records_to_insert)
+    }
+
+
+# ==========================================
+# 3. AUTO-DIALER CONTROLS
+# ==========================================
+@app.post("/api/campaign/{campaign_id}/start")
+async def start_campaign(campaign_id: int, request: Request):
+    delay = float(request.query_params.get("delay", 0.8))
+    course_type = request.query_params.get("course_type", None)
+    language = request.query_params.get("language", None)
+
+    try:
+        body = await request.json()
+        if isinstance(body, dict):
+            delay = float(body.get("delay", delay))
+            course_type = body.get("course_type", course_type)
+            language = body.get("language", language)
+    except Exception:
+        pass
+
+    res = start_campaign_dialer(campaign_id, delay_between_calls=delay, course_type=course_type, language=language)
+    return res
+
+@app.post("/api/campaign/{campaign_id}/pause")
+def pause_campaign(campaign_id: int):
+    res = pause_campaign_dialer(campaign_id)
+    return res
+
+@app.post("/api/campaign/{campaign_id}/stop")
+def stop_campaign(campaign_id: int):
+    res = stop_campaign_dialer(campaign_id)
+    return res
+
+class CampaignConfigModel(BaseModel):
+    course_type: str = "bca_internship"
+    language: str = "en"
+
+@app.post("/api/campaign/{campaign_id}/config")
+def update_campaign_config(campaign_id: int, config: CampaignConfigModel, db: Session = Depends(get_db)):
+    campaign = db.query(Campaign).filter(Campaign.id == campaign_id).first()
+    if not campaign:
+        raise HTTPException(status_code=404, detail="Campaign not found")
+    campaign.course_type = config.course_type
+    campaign.language = config.language
+    db.query(CallRecord).filter(
+        CallRecord.campaign_id == campaign_id,
+        CallRecord.status == "pending"
+    ).update({
+        "course_type": config.course_type,
+        "language": config.language
+    })
+    db.commit()
+    return {"status": "ok", "course_type": campaign.course_type, "language": campaign.language}
+
+
+# ==========================================
+# 4. CAMPAIGN STATUS & RESPONSE LOGS
+# ==========================================
+@app.get("/api/campaigns")
+def list_campaigns(db: Session = Depends(get_db)):
+    """Returns all campaigns so the frontend can display a campaign switcher or auto-select latest."""
+    campaigns = db.query(Campaign).order_by(Campaign.id.desc()).all()
+    return [
+        {
+            "id": c.id,
+            "name": c.name,
+            "file_name": c.file_name,
+            "course_type": c.course_type or "bca_internship",
+            "language": c.language or "en",
+            "total_numbers": c.total_numbers,
+            "completed_numbers": c.completed_numbers,
+            "status": c.status,
+            "created_at": c.created_at.strftime("%d %b %H:%M") if c.created_at else ""
+        }
+        for c in campaigns
+    ]
+
+
+@app.get("/api/campaign/{campaign_id}/status")
+def get_campaign_status(campaign_id: str, db: Session = Depends(get_db)):
+    account = db.query(Account).filter(Account.role == "client").first()
+    credits_left = account.credits if account else 30000.0
+    total_calls_made = account.total_calls_made if account else 0
+
+    if campaign_id == "all":
+        # Aggregate view of ALL campaigns
+        all_records = db.query(CallRecord).order_by(CallRecord.id.desc()).all()
+        records = all_records[:200]
+        total_records = len(all_records)
+        completed_records = sum(1 for r in all_records if r.status in ["answered", "completed", "failed", "busy", "no-answer"])
+        answered_count = sum(1 for r in all_records if r.status in ["answered", "completed"])
+        response_count = sum(1 for r in all_records if r.dtmf_digit != "")
+        total_cost_inr = sum(r.carrier_cost_inr or 0.0 for r in all_records)
+        unanswered_count = sum(1 for r in all_records if r.status in ["no-answer", "busy", "failed"])
+
+        return {
+            "campaign": {
+                "id": "all",
+                "name": "All Campaigns (All Calls)",
+                "status": "active",
+                "course_type": "all",
+                "language": "all",
+                "file_name": "Combined Historical & Live",
+                "created_at": "All Time"
+            },
+            "credits": round(float(credits_left), 2),
+            "total_calls_made": total_calls_made,
+            "total_records": total_records,
+            "completed_records": completed_records,
+            "answered_count": answered_count,
+            "unanswered_count": unanswered_count,
+            "response_count": response_count,
+            "total_cost_inr": round(total_cost_inr, 2),
+            "records": [
+                {
+                    "id": r.id,
+                    "phone_number": r.phone_number,
+                    "customer_name": r.customer_name,
+                    "course_type": r.course_type or "bca_internship",
+                    "language": r.language or "en",
+                    "status": r.status,
+                    "dtmf_digit": r.dtmf_digit,
+                    "response_note": r.response_note,
+                    "duration_sec": r.duration_sec,
+                    "carrier_cost_inr": r.carrier_cost_inr,
+                    "tokens_used": round(r.tokens_used, 1) if (r.tokens_used and r.tokens_used > 0) else (1.0 if r.status in ["answered", "completed"] else 0.3 if r.status not in ["pending", "dialing"] else 0.0),
+                    "called_at": r.called_at.strftime("%H:%M:%S") if r.called_at else ""
+                }
+                for r in records
+            ]
+        }
+
+    # Otherwise fetch specific or latest campaign
+    campaign = None
+    if campaign_id in ["latest", "0", "", "undefined"]:
+        campaign = db.query(Campaign).order_by(Campaign.id.desc()).first()
+    else:
         try:
-            with open(LOGS_FILE, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except Exception:
-            return []
-    return []
+            cid = int(campaign_id)
+            campaign = db.query(Campaign).filter(Campaign.id == cid).first()
+        except ValueError:
+            campaign = None
+
+    if not campaign:
+        campaign = db.query(Campaign).order_by(Campaign.id.desc()).first()
+
+    if not campaign:
+        return {
+            "campaign": None,
+            "credits": 30000.0,
+            "total_calls_made": 0,
+            "total_records": 0,
+            "completed_records": 0,
+            "answered_count": 0,
+            "unanswered_count": 0,
+            "response_count": 0,
+            "total_cost_inr": 0.0,
+            "records": []
+        }
+
+    records = (
+        db.query(CallRecord)
+        .filter(CallRecord.campaign_id == campaign.id)
+        .order_by(CallRecord.id.desc())
+        .limit(200)
+        .all()
+    )
+
+    all_records_query = db.query(CallRecord).filter(CallRecord.campaign_id == campaign.id)
+    total_records = all_records_query.count()
+    completed_records = all_records_query.filter(CallRecord.status.in_(["answered", "completed", "failed", "busy", "no-answer"])).count()
+    answered_count = all_records_query.filter(CallRecord.status.in_(["answered", "completed"])).count()
+    response_count = all_records_query.filter(CallRecord.dtmf_digit != "").count()
+
+    all_records = all_records_query.all()
+    total_cost_inr = sum(r.carrier_cost_inr or 0.0 for r in all_records)
+    unanswered_count = sum(1 for r in all_records if r.status in ["no-answer", "busy", "failed"])
+
+    return {
+        "campaign": {
+            "id": campaign.id,
+            "name": campaign.name,
+            "status": campaign.status,
+            "course_type": campaign.course_type or "bca_internship",
+            "language": campaign.language or "en",
+            "file_name": campaign.file_name,
+            "created_at": campaign.created_at.strftime("%Y-%m-%d %H:%M") if campaign.created_at else ""
+        },
+        "credits": round(float(credits_left), 2) if credits_left is not None else 30000.0,
+        "total_calls_made": total_calls_made,
+        "total_records": total_records,
+        "completed_records": completed_records,
+        "answered_count": answered_count,
+        "unanswered_count": unanswered_count,
+        "response_count": response_count,
+        "total_cost_inr": round(total_cost_inr, 2),
+        "records": [
+            {
+                "id": r.id,
+                "phone_number": r.phone_number,
+                "customer_name": r.customer_name,
+                "course_type": r.course_type or "bca_internship",
+                "language": r.language or "en",
+                "status": r.status,
+                "dtmf_digit": r.dtmf_digit,
+                "response_note": r.response_note,
+                "duration_sec": r.duration_sec,
+                "carrier_cost_inr": r.carrier_cost_inr,
+                "tokens_used": round(r.tokens_used, 1) if (r.tokens_used and r.tokens_used > 0) else (1.0 if r.status in ["answered", "completed"] else 0.3 if r.status not in ["pending", "dialing"] else 0.0),
+                "called_at": r.called_at.strftime("%H:%M:%S") if r.called_at else ""
+            }
+            for r in records
+        ]
+    }
 
 
-def update_excel_sheet(logs: list):
-    """
-    Generates a professionally styled Microsoft Excel (.xlsx) file
-    with full cost audit and client savings.
-    """
+# ==========================================
+# 5. EXPORT ANNOTATED RESPONSES TO EXCEL (.xlsx)
+# ==========================================
+@app.get("/api/campaign/{campaign_id}/export-excel")
+def export_campaign_excel(campaign_id: str, db: Session = Depends(get_db)):
+    if campaign_id == "all":
+        records = db.query(CallRecord).order_by(CallRecord.id.desc()).all()
+        file_label = "all_campaigns"
+    elif campaign_id in ["latest", "0", ""]:
+        campaign = db.query(Campaign).order_by(Campaign.id.desc()).first()
+        if not campaign:
+            raise HTTPException(status_code=404, detail="No campaigns found")
+        records = db.query(CallRecord).filter(CallRecord.campaign_id == campaign.id).order_by(CallRecord.id.asc()).all()
+        file_label = f"campaign_{campaign.id}"
+    else:
+        try:
+            cid = int(campaign_id)
+            campaign = db.query(Campaign).filter(Campaign.id == cid).first()
+        except ValueError:
+            campaign = None
+        if not campaign:
+            campaign = db.query(Campaign).order_by(Campaign.id.desc()).first()
+        if not campaign:
+            raise HTTPException(status_code=404, detail="Campaign not found")
+        records = db.query(CallRecord).filter(CallRecord.campaign_id == campaign.id).order_by(CallRecord.id.asc()).all()
+        file_label = f"campaign_{campaign.id}"
+
     wb = openpyxl.Workbook()
     ws = wb.active
-    ws.title = "Call Billing & Cost Audit"
+    ws.title = "Call Responses"
 
-    # Define styles
-    header_fill = PatternFill(start_color="1E293B", end_color="1E293B", fill_type="solid")
+    # Styling
+    header_fill = PatternFill(start_color="DB8B70", end_color="DB8B70", fill_type="solid")
     header_font = Font(name="Calibri", size=11, bold=True, color="FFFFFF")
-    total_fill = PatternFill(start_color="F1F5F9", end_color="F1F5F9", fill_type="solid")
-    total_font = Font(name="Calibri", size=11, bold=True, color="0F172A")
-    regular_font = Font(name="Calibri", size=11)
     center_align = Alignment(horizontal="center", vertical="center")
     right_align = Alignment(horizontal="right", vertical="center")
     left_align = Alignment(horizontal="left", vertical="center")
-    thin_border = Border(
-        left=Side(style="thin", color="E2E8F0"),
-        right=Side(style="thin", color="E2E8F0"),
-        top=Side(style="thin", color="E2E8F0"),
-        bottom=Side(style="thin", color="E2E8F0")
-    )
 
     headers = [
-        "Date & Time",
-        "Call UUID",
-        "From (Caller)",
-        "To (Destination)",
+        "S.No",
+        "Phone Number",
+        "Customer Name",
+        "Program / Course",
+        "Language",
+        "Call Status",
+        "Tokens Deducted (🪙)",
         "DTMF Key Pressed",
-        "Audio Flow Played",
-        "Duration (Sec)",
-        "Billable Minutes",
-        "Vobiz Telecom Cost (INR)",
-        "Live STT Cost (INR)",
-        "Live LLM Cost (INR)",
-        "Live TTS Cost (INR)",
-        "Total Cost (INR)",
-        "Client Savings vs Full AI (INR)"
+        "Annotated Response",
+        "Duration (Seconds)",
+        "Vobiz Cost (INR)",
+        "Call UUID",
+        "Timestamp"
     ]
-
     ws.append(headers)
-    for col_num in range(1, len(headers) + 1):
-        cell = ws.cell(row=1, column=col_num)
+    for col_idx in range(1, len(headers) + 1):
+        cell = ws.cell(row=1, column=col_idx)
         cell.fill = header_fill
         cell.font = header_font
         cell.alignment = center_align
-        ws.row_dimensions[1].height = 28
 
-    total_sec = 0.0
-    total_bill_min = 0
-    total_cost_inr = 0.0
-    total_saved_inr = 0.0
+    course_labels = {
+        "bca_internship": "BCA Internship",
+        "distance_education": "Distance Education",
+        "deep_courses": "DEEP Courses"
+    }
 
-    for row_idx, entry in enumerate(logs, start=2):
-        cost = entry.get("cost_breakdown", {})
-        dur_sec = cost.get("duration_seconds", 0)
-        bill_min = cost.get("billable_pulses_minutes", 1)
-        vobiz_cost = cost.get("vobiz_telecom_cost_inr", 0.0)
-        stt_cost = cost.get("ai_stt_cost_inr", 0.0)
-        llm_cost = cost.get("ai_llm_cost_inr", 0.0)
-        tts_cost = cost.get("ai_tts_cost_inr", 0.0)
-        total_call_cost = cost.get("total_cost_inr", 0.0)
-        saved = cost.get("savings_vs_full_ai_inr", 0.0)
+    for idx, r in enumerate(records, start=1):
+        t_used = round(r.tokens_used, 1) if (r.tokens_used and r.tokens_used > 0) else (1.0 if r.status in ["answered", "completed"] else 0.3 if r.status not in ["pending", "dialing"] else 0.0)
+        c_name = course_labels.get(r.course_type, r.course_type or "BCA Internship")
+        lang_name = (r.language or "en").upper()
+        ws.append([
+            idx,
+            r.phone_number,
+            r.customer_name or "—",
+            c_name,
+            lang_name,
+            r.status.upper(),
+            f"{t_used} Tokens" if r.status not in ["pending", "dialing"] else "Pending",
+            r.dtmf_digit or "—",
+            r.response_note or "—",
+            r.duration_sec,
+            round(r.carrier_cost_inr, 2),
+            r.vobiz_call_uuid or "—",
+            r.called_at.strftime("%Y-%m-%d %H:%M:%S") if r.called_at else "—"
+        ])
 
-        total_sec += dur_sec
-        total_bill_min += bill_min
-        total_cost_inr += total_call_cost
-        total_saved_inr += saved
-
-        row_data = [
-            entry.get("start_time_iso", ""),
-            entry.get("call_uuid", ""),
-            entry.get("from", ""),
-            entry.get("to", ""),
-            entry.get("dtmf_digit") or "None",
-            entry.get("audio_played", ""),
-            dur_sec,
-            bill_min,
-            vobiz_cost,
-            stt_cost,
-            llm_cost,
-            tts_cost,
-            total_call_cost,
-            saved
-        ]
-        ws.append(row_data)
-
-        # Style data cells
-        for col_idx in range(1, len(row_data) + 1):
-            c = ws.cell(row=row_idx, column=col_idx)
-            c.font = regular_font
-            c.border = thin_border
-            if col_idx in [5, 7, 8]:
-                c.alignment = center_align
-            elif col_idx in [9, 10, 11, 12, 13, 14]:
-                c.alignment = right_align
-                c.number_format = "#,##0.00"
-            else:
-                c.alignment = left_align
-
-    # Add Summary Row at the bottom
-    summary_row_idx = len(logs) + 2
-    summary_data = [
-        "TOTAL / SUMMARY",
-        f"{len(logs)} Calls",
-        "-",
-        "-",
-        "-",
-        "-",
-        round(total_sec, 2),
-        total_bill_min,
-        round(total_cost_inr, 2),
-        0.00,
-        0.00,
-        0.00,
-        round(total_cost_inr, 2),
-        round(total_saved_inr, 2)
-    ]
-    ws.append(summary_data)
-    ws.row_dimensions[summary_row_idx].height = 24
-    for col_idx in range(1, len(summary_data) + 1):
-        c = ws.cell(row=summary_row_idx, column=col_idx)
-        c.fill = total_fill
-        c.font = total_font
-        c.border = thin_border
-        if col_idx in [9, 10, 11, 12, 13, 14]:
-            c.alignment = right_align
-            c.number_format = "#,##0.00"
-        else:
-            c.alignment = center_align
-
-    # Auto-fit column widths
+    # Auto column width
     for col in ws.columns:
-        max_len = max(len(str(cell.value or "")) for cell in col)
-        col_letter = get_column_letter(col[0].column)
-        ws.column_dimensions[col_letter].width = max(max_len + 4, 14)
+        max_len = max(len(str(cell.value or '')) for cell in col)
+        col_letter = openpyxl.utils.get_column_letter(col[0].column)
+        ws.column_dimensions[col_letter].width = max(max_len + 4, 12)
 
-    try:
-        wb.save(str(EXCEL_FILE))
-    except PermissionError:
-        # If user has the file open in Excel on Windows, save to a fallback copy
-        fallback = BASE_DIR / "call_billing_log_latest.xlsx"
-        wb.save(str(fallback))
-        print(f"[*] Note: '{EXCEL_FILE.name}' is currently open in Excel. Saved update to '{fallback.name}'")
+    export_path = EXPORTS_DIR / f"campaign_{campaign_id}_responses.xlsx"
+    wb.save(export_path)
 
-    # Also maintain CSV mirror for instant access
-    try:
-        import csv
-        csv_file = BASE_DIR / "call_billing_log.csv"
-        with open(csv_file, "w", newline="", encoding="utf-8-sig") as cf:
-            writer = csv.writer(cf)
-            writer.writerow(headers)
-            for entry in logs:
-                cost = entry.get("cost_breakdown", {})
-                writer.writerow([
-                    entry.get("start_time_iso", ""),
-                    entry.get("call_uuid", ""),
-                    entry.get("from", ""),
-                    entry.get("to", ""),
-                    entry.get("dtmf_digit") or "None",
-                    entry.get("audio_played", ""),
-                    cost.get("duration_seconds", 0),
-                    cost.get("billable_pulses_minutes", 1),
-                    f"{cost.get('vobiz_telecom_cost_inr', 0):.2f}",
-                    "0.00",
-                    "0.00",
-                    "0.00",
-                    f"{cost.get('total_cost_inr', 0):.2f}",
-                    f"{cost.get('savings_vs_full_ai_inr', 0):.2f}"
-                ])
-            writer.writerow(summary_data)
-    except Exception as e:
-        print(f"[!] Warning updating CSV: {e}")
-
-
-def save_log_entry(entry: dict):
-    logs = load_logs()
-    existing_index = next((i for i, x in enumerate(logs) if x.get("call_uuid") == entry.get("call_uuid")), None)
-    if existing_index is not None:
-        logs[existing_index] = entry
-    else:
-        logs.append(entry)
-
-    with open(LOGS_FILE, "w", encoding="utf-8") as f:
-        json.dump(logs, f, indent=2, ensure_ascii=False)
-
-    # Refresh Excel spreadsheet
-    try:
-        update_excel_sheet(logs)
-    except Exception as e:
-        print(f"[!] Warning: Could not update Excel file: {e}")
-
-
-from vobiz_cdr import fetch_live_vobiz_call_cost
-
-
-def calculate_cost(duration_seconds: float, call_id: str = None) -> dict:
-    """
-    Calculates cost based on live Vobiz CDR API ledger deduction if available,
-    otherwise standard 60-second telecom carrier pulse benchmark.
-    AI Cost is 0.00 since pre-rendered audio and hardware DTMF are used.
-    """
-    duration = max(1.0, float(duration_seconds))
-    billable_minutes = math.ceil(duration / 60.0)
-
-    live_cdr = fetch_live_vobiz_call_cost(call_id)
-    if live_cdr:
-        vobiz_cost = live_cdr["live_vobiz_cost_inr"]
-        billing_source = "Live Vobiz Carrier CDR"
-        billable_minutes = math.ceil(live_cdr.get("bill_duration_sec", duration) / 60.0)
-    else:
-        vobiz_cost = round(billable_minutes * VOBIZ_PER_MINUTE_RATE, 3)
-        billing_source = "Telecom Pulse Benchmark"
-
-    total_cost = vobiz_cost
-
-    return {
-        "duration_seconds": round(duration, 2),
-        "billable_pulses_minutes": billable_minutes,
-        "vobiz_telecom_cost_inr": vobiz_cost,
-        "billing_source": billing_source,
-        "ai_stt_cost_inr": 0.00,
-        "ai_llm_cost_inr": 0.00,
-        "ai_tts_cost_inr": 0.00,
-        "total_cost_inr": total_cost,
-        "savings_vs_full_ai_inr": round(billable_minutes * 3.00 - total_cost, 2)
-    }
-
-
-def print_cost_summary(call_data: dict):
-    c = call_data.get("cost_breakdown", {})
-    print("\n" + "=" * 65)
-    print("                CALL COMPLETED - COST AUDIT                ")
-    print("=" * 65)
-    print(f" Call UUID         : {call_data.get('call_uuid')}")
-    print(f" Caller (From)     : {call_data.get('from')}")
-    print(f" Destination (To)  : {call_data.get('to')}")
-    print(f" DTMF Key Pressed  : {call_data.get('dtmf_digit', 'None')}")
-    print(f" Audio Played      : {call_data.get('audio_played')}")
-    print(f" Call Duration     : {c.get('duration_seconds', 0)} seconds ({c.get('billable_pulses_minutes', 1)} billable min)")
-    print("-" * 65)
-    print(f" 1. Vobiz Telecom Cost : INR {c.get('vobiz_telecom_cost_inr', 0):.2f}")
-    print(f" 2. Live STT Cost      : INR 0.00 (Zero - Keypad DTMF used)")
-    print(f" 3. Live LLM Cost      : INR 0.00 (Zero - Deterministic Python routing)")
-    print(f" 4. Live TTS Cost      : INR 0.00 (Zero - Pre-rendered on disk)")
-    print("-" * 65)
-    print(f" TOTAL COST FOR THIS CALL : INR {c.get('total_cost_inr', 0):.2f}")
-    print(f" Estimated Client Savings : INR {c.get('savings_vs_full_ai_inr', 0):.2f}")
-    print(f" Excel Sheet Updated      : {EXCEL_FILE.name}")
-    print("=" * 65 + "\n")
-
-
-@app.get("/")
-def home():
-    logs = load_logs()
-    total_calls = len(logs)
-    total_cost = sum(x.get("cost_breakdown", {}).get("total_cost_inr", 0) for x in logs)
-
-    return {
-        "status": "online",
-        "agent": "Vobiz DTMF Calling Agent with Real-Time Excel Cost Audit",
-        "total_calls_logged": total_calls,
-        "total_cost_spent_inr": round(total_cost, 2),
-        "excel_download_url": f"{SERVER_BASE_URL}/download-excel",
-        "dashboard_url": f"{SERVER_BASE_URL}/dashboard",
-        "logs_api": f"{SERVER_BASE_URL}/logs",
-        "audio_files_available": [f.name for f in AUDIO_DIR.glob("*.*")],
-        "endpoints": {
-            "incoming_call": f"{SERVER_BASE_URL}/call/incoming",
-            "dtmf_handler": f"{SERVER_BASE_URL}/call/dtmf",
-            "status_handler": f"{SERVER_BASE_URL}/call/status"
-        }
-    }
-
-
-@app.get("/download-excel")
-def download_excel():
-    """Download the formatted Excel spreadsheet directly."""
-    if not EXCEL_FILE.exists():
-        logs = load_logs()
-        update_excel_sheet(logs)
     return FileResponse(
-        path=str(EXCEL_FILE),
-        filename="call_billing_log.xlsx",
+        path=str(export_path),
+        filename=f"annotated_responses_campaign_{campaign_id}.xlsx",
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     )
 
 
-@app.api_route("/call/incoming", methods=["GET", "POST"])
-async def incoming_call(request: Request):
-    """
-    Triggered when a call is connected. Starts the timing clock and plays welcome.wav.
-    """
-    call_start_time = time.time()
-    dt_now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+# ==========================================
+# 6. ADMIN & CREDIT MANAGEMENT
+# ==========================================
+@app.get("/api/vobiz/account")
+def vobiz_account_info():
+    """Fetches real-time live account cash credits balance and CDR directly from Vobiz API."""
+    info = get_vobiz_account_details()
+    info["caller_id"] = VOBIZ_OUTBOUND_NUMBER
+    return info
 
+@app.post("/api/account/credits")
+def update_credits(data: CreditUpdateModel, db: Session = Depends(get_db)):
+    account = db.query(Account).filter(Account.role == "client").first()
+    if account:
+        account.credits = data.credits
+        db.commit()
+        return {"status": "ok", "credits": account.credits}
+    return {"status": "error", "message": "Account not found"}
+
+@app.post("/api/account/credits/add")
+def add_credits(data: CreditAddModel, db: Session = Depends(get_db)):
+    account = db.query(Account).filter(Account.role == "client").first()
+    if account:
+        account.credits += data.amount
+        db.commit()
+        return {"status": "ok", "credits": account.credits}
+    return {"status": "error", "message": "Account not found"}
+
+
+# ==========================================
+# 7. TELEPHONY WEBHOOKS (Vobiz Interactive Call Flow)
+# ==========================================
+@app.api_route("/call/incoming", methods=["GET", "POST"])
+async def incoming_call(request: Request, db: Session = Depends(get_db)):
+    """
+    Triggered when outbound call answers or connects.
+    Plays the configured course & language audio and awaits DTMF 1.
+    """
     form = {}
     if request.method == "POST":
         try:
@@ -356,101 +601,118 @@ async def incoming_call(request: Request):
         except Exception:
             pass
 
-    call_uuid = str(form.get("CallUUID", form.get("call_uuid", f"call_{int(call_start_time)}")))
-    from_num = str(form.get("From", "Unknown"))
-    to_num = str(form.get("To", "Unknown"))
+    to_num = str(form.get("To", "")).strip()
+    call_uuid = str(form.get("CallUUID", form.get("call_uuid", ""))).strip()
 
-    call_entry = {
-        "call_uuid": call_uuid,
-        "from": from_num,
-        "to": to_num,
-        "status": "connected",
-        "start_time_iso": dt_now,
-        "start_time_ts": call_start_time,
-        "dtmf_digit": None,
-        "audio_played": "welcome.wav",
-        "cost_breakdown": calculate_cost(0.1)
-    }
-    active_calls[call_uuid] = call_entry
-    save_log_entry(call_entry)
+    record = None
+    if to_num or call_uuid:
+        cleaned_to = to_num.replace(" ", "").replace("-", "")
+        record = (
+            db.query(CallRecord)
+            .filter((CallRecord.phone_number.contains(cleaned_to[-10:])) | (CallRecord.vobiz_call_uuid == call_uuid))
+            .order_by(CallRecord.id.desc())
+            .first()
+        )
 
-    print(f"\n[CALL INITIATED] CallUUID: {call_uuid} | From: {from_num} | To: {to_num} at {dt_now}")
+    course_type = record.course_type or "bca_internship" if record else "bca_internship"
+    lang = record.language or "en" if record else "en"
 
-    welcome_audio_url = f"{SERVER_BASE_URL}/audio/welcome.wav"
-    timeout_audio_url = f"{SERVER_BASE_URL}/audio/timeout.wav"
+    prompt_file = f"{course_type}_{lang}.wav"
+    if not (AUDIO_DIR / prompt_file).exists():
+        prompt_file = f"{course_type}_en.wav"
+        if not (AUDIO_DIR / prompt_file).exists():
+            prompt_file = "welcome.wav"
+
+    timeout_file = f"timeout_{lang}.wav"
+    if not (AUDIO_DIR / timeout_file).exists():
+        timeout_file = "timeout.wav"
+
+    if record:
+        record.status = "answered"
+        record.response_note = f"Call answered. Playing {course_type} ({lang.upper()})"
+        record.audio_flow = prompt_file
+        if call_uuid:
+            record.vobiz_call_uuid = call_uuid
+        db.commit()
+
+    prompt_audio_url = f"{SERVER_BASE_URL}/audio/{prompt_file}"
+    timeout_audio_url = f"{SERVER_BASE_URL}/audio/{timeout_file}"
     dtmf_action_url = f"{SERVER_BASE_URL}/call/dtmf"
 
     xml_content = f"""<?xml version="1.0" encoding="UTF-8"?>
 <Response>
-    <Gather action="{dtmf_action_url}" method="POST" inputType="dtmf" numDigits="1" executionTimeout="25">
-        <Play>{welcome_audio_url}</Play>
+    <Gather action="{dtmf_action_url}" method="POST" inputType="dtmf" numDigits="1" timeout="6">
+        <Play>{prompt_audio_url}</Play>
     </Gather>
     <Play>{timeout_audio_url}</Play>
     <Hangup/>
 </Response>"""
-
     return Response(content=xml_content.strip(), media_type="application/xml")
 
 
 @app.api_route("/call/dtmf", methods=["GET", "POST"])
-async def handle_dtmf(request: Request):
+async def handle_dtmf(request: Request, db: Session = Depends(get_db)):
     """
-    Triggered when caller presses a keypad digit (DTMF).
-    Logs the exact timestamp, updates the audio played, and computes live cost.
+    Caller pressed a keypad key. Notate the response into the DB!
     """
-    dtmf_time = time.time()
     digits = ""
     call_uuid = ""
-    caller = ""
+    to_num = ""
 
     if request.method == "POST":
         try:
             form = await request.form()
             digits = str(form.get("Digits", "")).strip()
             call_uuid = str(form.get("CallUUID", form.get("call_uuid", ""))).strip()
-            caller = str(form.get("From", "")).strip()
+            to_num = str(form.get("To", "")).strip()
         except Exception as e:
-            print(f"[!] Error reading form: {e}")
+            print(f"[!] Error reading DTMF form: {e}")
     else:
         digits = request.query_params.get("Digits", "").strip()
 
-    call_entry = active_calls.get(call_uuid)
-    if not call_entry:
-        if active_calls:
-            call_uuid = list(active_calls.keys())[-1]
-            call_entry = active_calls[call_uuid]
-        else:
-            call_entry = {
-                "call_uuid": call_uuid or f"call_{int(dtmf_time)}",
-                "from": caller,
-                "to": "N/A",
-                "start_time_iso": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                "start_time_ts": dtmf_time - 5.0,
-            }
+    # Match database record
+    cleaned_to = to_num.replace(" ", "").replace("-", "") if to_num else ""
+    record = (
+        db.query(CallRecord)
+        .filter((CallRecord.vobiz_call_uuid == call_uuid) | (CallRecord.phone_number.contains(cleaned_to[-10:]) if cleaned_to else False))
+        .order_by(CallRecord.id.desc())
+        .first()
+    )
 
-    start_ts = call_entry.get("start_time_ts", dtmf_time)
-    elapsed = dtmf_time - start_ts
+    course_type = record.course_type or "bca_internship" if record else "bca_internship"
+    lang = record.language or "en" if record else "en"
 
-    call_entry["dtmf_digit"] = digits
-    call_entry["dtmf_timestamp_iso"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    course_name_map = {
+        "bca_internship": "BCA Internship Program",
+        "distance_education": "Online & Distance Education",
+        "deep_courses": "DEEP Courses"
+    }
+    course_name = course_name_map.get(course_type, "Program Details")
 
+    # Determine response note and audio
     if digits == "1":
-        selected_audio = "audio_1.wav"
-        est_final_duration = elapsed + 10.0
-    elif digits == "2":
-        selected_audio = "audio_2.wav"
-        est_final_duration = elapsed + 10.0
+        selected_audio = f"ack_{lang}.wav"
+        if not (AUDIO_DIR / selected_audio).exists():
+            selected_audio = "ack_en.wav"
+        response_note = f"Pressed 1: WhatsApp Details Requested ({course_name})"
+    elif digits:
+        selected_audio = f"timeout_{lang}.wav"
+        if not (AUDIO_DIR / selected_audio).exists():
+            selected_audio = "timeout.wav"
+        response_note = f"Pressed Key: {digits}"
     else:
-        selected_audio = "timeout.wav"
-        est_final_duration = elapsed + 6.0
+        selected_audio = f"timeout_{lang}.wav"
+        if not (AUDIO_DIR / selected_audio).exists():
+            selected_audio = "timeout.wav"
+        response_note = "Listened to prompt (No key pressed / Timeout)"
 
-    call_entry["audio_played"] = f"welcome.wav -> {selected_audio}"
-    call_entry["status"] = "playing_response"
-    call_entry["cost_breakdown"] = calculate_cost(est_final_duration)
-    save_log_entry(call_entry)
-
-    print(f"\n[DTMF RECEIVED] CallUUID: {call_uuid} | Key: '{digits}' | Elapsed so far: {elapsed:.1f}s")
-    print_cost_summary(call_entry)
+    if record:
+        record.dtmf_digit = digits
+        record.response_note = response_note
+        record.audio_flow = f"{course_type}_{lang}.wav -> {selected_audio}"
+        record.status = "answered"
+        db.commit()
+        print(f"\n[RESPONSE NOTATED] Phone: {record.phone_number} | Key: {digits} | Response: {response_note}")
 
     audio_url = f"{SERVER_BASE_URL}/audio/{selected_audio}"
     xml_content = f"""<?xml version="1.0" encoding="UTF-8"?>
@@ -458,14 +720,13 @@ async def handle_dtmf(request: Request):
     <Play>{audio_url}</Play>
     <Hangup/>
 </Response>"""
-
     return Response(content=xml_content.strip(), media_type="application/xml")
 
 
 @app.api_route("/call/status", methods=["GET", "POST"])
-async def call_status(request: Request):
+async def call_status(request: Request, db: Session = Depends(get_db)):
     """
-    Called by Vobiz carrier on hangup with official carrier duration and billing duration.
+    Carrier hangup callback. Calculates exact telecom cost and duration.
     """
     form = {}
     try:
@@ -474,107 +735,43 @@ async def call_status(request: Request):
         pass
 
     call_uuid = str(form.get("CallUUID", form.get("call_uuid", ""))).strip()
+    to_num = str(form.get("To", "")).strip()
     carrier_duration = form.get("Duration", form.get("BillDuration"))
 
-    if call_uuid and call_uuid in active_calls:
-        call_entry = active_calls[call_uuid]
-        call_entry["status"] = "completed"
-        call_entry["end_time_iso"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    cleaned_to = to_num.replace(" ", "").replace("-", "") if to_num else ""
+    record = (
+        db.query(CallRecord)
+        .filter((CallRecord.vobiz_call_uuid == call_uuid) | (CallRecord.phone_number.contains(cleaned_to[-10:]) if cleaned_to else False))
+        .order_by(CallRecord.id.desc())
+        .first()
+    )
 
+    if record:
         if carrier_duration:
-            duration_sec = float(carrier_duration)
-            call_entry["cost_breakdown"] = calculate_cost(duration_sec)
-        save_log_entry(call_entry)
-        print_cost_summary(call_entry)
+            dur = float(carrier_duration)
+            record.duration_sec = dur
+            billable_minutes = math.ceil(dur / 60.0) if dur > 0 else 0
+            record.carrier_cost_inr = round(billable_minutes * VOBIZ_PER_MINUTE_RATE, 2)
+            if dur > 0:
+                record.status = "completed"
+                record.tokens_used = 1.0
+            else:
+                record.status = "no-answer"
+                record.response_note = "Rings but Nobody Answers"
+                record.tokens_used = 0.3
+        else:
+            record.status = "completed"
+            record.tokens_used = 1.0
+        db.commit()
 
     return {"status": "ok"}
-
-
-@app.get("/logs")
-def get_logs():
-    return {"calls": load_logs()}
-
-
-@app.get("/dashboard", response_class=HTMLResponse)
-def dashboard():
-    """Interactive visual dashboard showing call durations and exact costs with Excel download."""
-    logs = load_logs()
-    total_calls = len(logs)
-    total_sec = sum(x.get("cost_breakdown", {}).get("duration_seconds", 0) for x in logs)
-    total_cost = sum(x.get("cost_breakdown", {}).get("total_cost_inr", 0) for x in logs)
-    total_savings = sum(x.get("cost_breakdown", {}).get("savings_vs_full_ai_inr", 0) for x in logs)
-
-    rows = ""
-    for c in reversed(logs):
-        cost = c.get("cost_breakdown", {})
-        rows += f"""
-        <tr>
-            <td style="padding:10px; border-bottom:1px solid #334155;">{c.get('start_time_iso')}</td>
-            <td style="padding:10px; border-bottom:1px solid #334155; font-family:monospace;">{c.get('call_uuid')[:14]}...</td>
-            <td style="padding:10px; border-bottom:1px solid #334155;">{c.get('from')}</td>
-            <td style="padding:10px; border-bottom:1px solid #334155; text-align:center;"><strong>{c.get('dtmf_digit', '-')}</strong></td>
-            <td style="padding:10px; border-bottom:1px solid #334155;">{c.get('audio_played')}</td>
-            <td style="padding:10px; border-bottom:1px solid #334155; text-align:center;">{cost.get('duration_seconds', 0)}s</td>
-            <td style="padding:10px; border-bottom:1px solid #334155; text-align:right; color:#10b981; font-weight:bold;">₹{cost.get('total_cost_inr', 0):.2f}</td>
-            <td style="padding:10px; border-bottom:1px solid #334155; text-align:right; color:#38bdf8;">₹{cost.get('savings_vs_full_ai_inr', 0):.2f}</td>
-        </tr>
-        """
-
-    return f"""
-    <!DOCTYPE html>
-    <html>
-    <head>
-        <title>Call Cost & Duration Dashboard</title>
-        <style>
-            body {{ font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #0f172a; color: #f8fafc; padding: 30px; }}
-            .container {{ max-width: 1100px; margin: 0 auto; }}
-            .header-flex {{ display: flex; justify-content: space-between; align-items: center; margin-bottom: 25px; }}
-            .btn-excel {{ background: #10b981; color: white; padding: 12px 20px; border-radius: 8px; text-decoration: none; font-weight: bold; display: inline-flex; align-items: center; gap: 8px; }}
-            .btn-excel:hover {{ background: #059669; }}
-            .cards {{ display: grid; grid-template-columns: repeat(4, 1fr); gap: 20px; margin-bottom: 30px; }}
-            .card {{ background: #1e293b; padding: 20px; border-radius: 12px; border: 1px solid #334155; }}
-            .card-title {{ font-size: 13px; color: #94a3b8; text-transform: uppercase; letter-spacing: 1px; }}
-            .card-value {{ font-size: 28px; font-weight: bold; margin-top: 10px; }}
-            table {{ width: 100%; border-collapse: collapse; background: #1e293b; border-radius: 12px; overflow: hidden; }}
-            th {{ background: #334155; padding: 12px 10px; text-align: left; font-size: 14px; }}
-        </style>
-    </head>
-    <body>
-        <div class="container">
-            <div class="header-flex">
-                <div>
-                    <h1>📞 Vobiz DTMF Calling Agent - Live Cost Audit</h1>
-                    <p style="color:#94a3b8; margin: 4px 0 0 0;">Real-time call duration tracker and client billing audit</p>
-                </div>
-                <a href="/download-excel" class="btn-excel">📥 Download Excel (.xlsx)</a>
-            </div>
-            <div class="cards">
-                <div class="card"><div class="card-title">Total Calls</div><div class="card-value">{total_calls}</div></div>
-                <div class="card"><div class="card-title">Total Duration</div><div class="card-value">{int(total_sec)}s</div></div>
-                <div class="card"><div class="card-title">Total Billed (Vobiz)</div><div class="card-value" style="color:#10b981;">₹{total_cost:.2f}</div></div>
-                <div class="card"><div class="card-title">Client Saved</div><div class="card-value" style="color:#38bdf8;">₹{total_savings:.2f}</div></div>
-            </div>
-            <table>
-                <thead>
-                    <tr>
-                        <th>Date & Time</th><th>Call UUID</th><th>Caller</th><th style="text-align:center;">DTMF</th><th>Audio Flow</th><th style="text-align:center;">Duration</th><th style="text-align:right;">Actual Cost</th><th style="text-align:right;">Client Saved</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {rows if rows else '<tr><td colspan="8" style="padding:20px; text-align:center; color:#94a3b8;">No calls logged yet. Initiate a call to see live data!</td></tr>'}
-                </tbody>
-            </table>
-        </div>
-    </body>
-    </html>
-    """
 
 
 if __name__ == "__main__":
     port = int(os.getenv("PORT", 8000))
     print("=" * 65)
-    print(f" Starting Calling Agent & Live Excel Cost Tracker on port {port}")
-    print(f" Excel Report  : {EXCEL_FILE.resolve()}")
-    print(f" Dashboard URL : {SERVER_BASE_URL}/dashboard")
+    print(f" Starting Vobiz Auto-Dialer & Response Hub on port {port}")
+    print(f" Web UI        : {SERVER_BASE_URL}/")
+    print(f" Admin Panel   : {SERVER_BASE_URL}/ (Click 'Admin & Carrier Wallet' tab)")
     print("=" * 65)
     uvicorn.run("calling_agent:app", host="0.0.0.0", port=port, reload=True)

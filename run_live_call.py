@@ -17,7 +17,7 @@ if hasattr(sys.stdout, "reconfigure"):
 load_dotenv()
 
 from livekit import api, rtc
-from calling_agent import save_log_entry, calculate_cost, print_cost_summary
+from database import SessionLocal, CallRecord, Account
 from vobiz_cdr import fetch_live_vobiz_call_cost
 
 AUDIO_DIR = Path(__file__).parent / "audio"
@@ -40,7 +40,7 @@ def format_phone(phone: str) -> str:
 
 async def play_audio_file(audio_source: rtc.AudioSource, filepath: Path, interrupt_event: asyncio.Event = None):
     """
-    Streams a WAV file into the LiveKit audio track with pre-buffering to eliminate any stuttering or breaking.
+    Streams a WAV file into the LiveKit audio track with buffering to guarantee clean playback.
     """
     if not filepath.exists():
         print(f"[!] Audio file not found: {filepath}")
@@ -58,7 +58,6 @@ async def play_audio_file(audio_source: rtc.AudioSource, filepath: Path, interru
             if interrupt_event and interrupt_event.is_set():
                 break
 
-            # Keep a healthy buffer (0.4s) in queue so Windows timer jitter never starves WebRTC
             if audio_source.queued_duration > 0.4:
                 await asyncio.sleep(0.05)
                 continue
@@ -78,22 +77,81 @@ async def play_audio_file(audio_source: rtc.AudioSource, filepath: Path, interru
             await audio_source.wait_for_playout()
 
 
-async def execute_live_call(target_phone: str):
+async def execute_live_call(target_phone: str, record_id: int = None, course_type: str = "bca_internship", language: str = "en", stop_event: asyncio.Event = None) -> dict:
+    """
+    1. Connects LiveKit Room with audio track.
+    2. Places SIP call through Vobiz Trunk.
+    3. Streams the configured course & language audio (e.g. bca_internship_hi.wav) at calm speed.
+    4. Listens for live DTMF keypress (Press 1 for WhatsApp details).
+    5. Streams multilingual acknowledgment audio (ack_hi.wav) or timeout audio.
+    6. Automatically terminates the telephone call via SIP BYE (delete_room).
+    7. Updates DB CallRecord with duration, cost, DTMF input, and WhatsApp interest annotation.
+    """
     target_phone = format_phone(target_phone)
     call_start_time = time.time()
-    dt_now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     room_name = f"call-{target_phone.replace('+', '')}-{int(call_start_time)}"
 
-    print("=" * 65)
-    print("      DIALING PHONE NUMBER - LIVE ZERO-COST AUDIO AGENT      ")
-    print("=" * 65)
-    print(f" Target Number (To)    : {target_phone}")
-    print(f" Caller ID (From)      : {VOBIZ_OUTBOUND_NUMBER}")
-    print(f" LiveKit Room          : {room_name}")
-    print(f" Outbound SIP Trunk    : {OUTBOUND_TRUNK_ID}")
+    # Determine course and language from record if present
+    if record_id:
+        db = SessionLocal()
+        try:
+            rec = db.query(CallRecord).filter(CallRecord.id == record_id).first()
+            if rec:
+                if rec.course_type:
+                    course_type = rec.course_type
+                if rec.language:
+                    language = rec.language
+        except Exception:
+            pass
+        finally:
+            db.close()
+
+    prompt_filename = f"{course_type}_{language}.wav"
+    prompt_path = AUDIO_DIR / prompt_filename
+    if not prompt_path.exists():
+        prompt_filename = f"{course_type}_en.wav"
+        prompt_path = AUDIO_DIR / prompt_filename
+        if not prompt_path.exists():
+            prompt_filename = "welcome.wav"
+            prompt_path = AUDIO_DIR / prompt_filename
+
+    ack_filename = f"ack_{language}.wav"
+    ack_path = AUDIO_DIR / ack_filename
+    if not ack_path.exists():
+        ack_path = AUDIO_DIR / "ack_en.wav"
+        ack_filename = ack_path.name
+
+    timeout_filename = f"timeout_{language}.wav"
+    timeout_path = AUDIO_DIR / timeout_filename
+    if not timeout_path.exists():
+        timeout_path = AUDIO_DIR / "timeout.wav"
+        timeout_filename = timeout_path.name
+
+    print("\n" + "=" * 65)
+    print(f"[*] DIALING: {target_phone} via Vobiz SIP Trunk")
+    print(f"[*] Program : {course_type} | Language: {language.upper()}")
+    print(f"[*] Prompt  : {prompt_filename}")
+    print(f"[*] Room    : {room_name}")
     print("=" * 65)
 
-    # 1. Create a JWT token for our audio bot to join the room
+    def update_record(**kwargs):
+        if not record_id:
+            return
+        db = SessionLocal()
+        try:
+            rec = db.query(CallRecord).filter(CallRecord.id == record_id).first()
+            if rec:
+                for k, v in kwargs.items():
+                    setattr(rec, k, v)
+                db.commit()
+        except Exception as e:
+            print(f"[!] DB update error: {e}")
+        finally:
+            db.close()
+
+    update_record(status="calling", response_note="Ringing destination...", vobiz_call_uuid=room_name)
+
+    # 1. Generate JWT token
     token_builder = (
         api.AccessToken(LIVEKIT_API_KEY, LIVEKIT_API_SECRET)
         .with_identity("audio_player_agent")
@@ -102,23 +160,20 @@ async def execute_live_call(target_phone: str):
     )
     token = token_builder.to_jwt()
 
-    # 2. Connect to the LiveKit Room
+    # 2. Connect Room
     room = rtc.Room()
-    print("[*] Connecting Audio Bot to LiveKit room...")
-    ws_url = LIVEKIT_URL
-    await room.connect(ws_url, token)
-    print(f"[+] Audio Bot connected to room: {room.name}")
+    await room.connect(LIVEKIT_URL, token)
+    print(f"[+] Audio Bot joined LiveKit room: {room.name}")
 
-    # 3. Create Audio Source & Track (48kHz HD Audio)
-    sample_rate = 48000
-    audio_source = rtc.AudioSource(sample_rate=sample_rate, num_channels=1)
+    # 3. Create Audio Track (48kHz)
+    audio_source = rtc.AudioSource(sample_rate=48000, num_channels=1)
     track = rtc.LocalAudioTrack.create_audio_track("agent_ivr_audio", audio_source)
     options = rtc.TrackPublishOptions(source=rtc.TrackSource.SOURCE_MICROPHONE)
-    publication = await room.local_participant.publish_track(track, options)
+    await room.local_participant.publish_track(track, options)
     print("[+] Audio Track published to room (48kHz Studio Quality).")
 
-    # State variables
     call_answered = asyncio.Event()
+    call_declined = asyncio.Event()
     dtmf_received_event = asyncio.Event()
     dtmf_digit_holder = {"digit": None}
     audio_history = ["welcome.wav"]
@@ -133,9 +188,12 @@ async def execute_live_call(target_phone: str):
     @room.on("participant_disconnected")
     def on_participant_disconnected(p: rtc.RemoteParticipant):
         nonlocal call_active
-        print(f"\n[PHONE HUNG UP] Caller disconnected: {p.identity}")
-        call_active = False
-        dtmf_received_event.set()
+        if p.identity.startswith("caller_"):
+            print(f"\n[PHONE HUNG UP / DECLINED] Caller disconnected: {p.identity}")
+            call_active = False
+            if not call_answered.is_set():
+                call_declined.set()
+            dtmf_received_event.set()
 
     @room.on("sip_dtmf_received")
     def on_sip_dtmf(dtmf_event: rtc.SipDTMF):
@@ -146,9 +204,9 @@ async def execute_live_call(target_phone: str):
         dtmf_digit_holder["digit"] = digit
         dtmf_received_event.set()
 
-    # 4. Dial the SIP Participant through Vobiz Trunk with wait_until_answered=True
+    # 4. Dial through Vobiz Trunk
     lk_api = api.LiveKitAPI(LIVEKIT_URL, LIVEKIT_API_KEY, LIVEKIT_API_SECRET)
-    print(f"[*] Placing phone call to {target_phone} via Vobiz Trunk...")
+    sip_call_id = ""
     try:
         sip_req = api.CreateSIPParticipantRequest(
             sip_trunk_id=OUTBOUND_TRUNK_ID,
@@ -156,115 +214,166 @@ async def execute_live_call(target_phone: str):
             sip_number=VOBIZ_OUTBOUND_NUMBER,
             room_name=room_name,
             participant_identity=f"caller_{target_phone}",
-            wait_until_answered=True  # Crucial: only join room once human answers phone!
+            wait_until_answered=True
         )
         res = await lk_api.sip.create_sip_participant(sip_req)
         sip_call_id = res.sip_call_id
-        print(f"[+] Call Dispatched! SIP Call ID: {sip_call_id}")
-        print("[*] Phone is ringing... Please answer your phone when it rings!")
+        update_record(vobiz_call_uuid=sip_call_id)
+        print(f"[+] Call Ringing! SIP Call ID: {sip_call_id}")
     except Exception as e:
         print(f"[!] Error creating SIP participant: {e}")
+        err_lower = str(e).lower()
+        if any(w in err_lower for w in ["busy", "decline", "reject", "486", "603", "cancelled"]):
+            status_val = "busy"
+            note_val = "User declines before picking up"
+        elif any(w in err_lower for w in ["invalid", "unallocated", "format", "not found", "404", "410", "unreachable"]):
+            status_val = "failed"
+            note_val = "Failed / Invalid Number"
+        else:
+            status_val = "failed"
+            note_val = f"Failed / Network Error ({e})"
+
+        update_record(status=status_val, response_note=note_val, tokens_used=0.3)
         await lk_api.aclose()
         await room.disconnect()
-        return
+        return {"success": False, "status": status_val, "tokens_used": 0.3, "error": str(e)}
 
-    # Wait for phone to be answered (up to 45 seconds timeout)
-    try:
-        await asyncio.wait_for(call_answered.wait(), timeout=45.0)
-    except asyncio.TimeoutError:
-        print("\n[!] Call not answered within 45 seconds.")
+    # Wait for phone to be answered (or declined, up to 40s timeout)
+    answered_task = asyncio.create_task(call_answered.wait())
+    declined_task = asyncio.create_task(call_declined.wait())
+
+    done, pending = await asyncio.wait(
+        [answered_task, declined_task],
+        timeout=40.0,
+        return_when=asyncio.FIRST_COMPLETED
+    )
+
+    for p in pending:
+        p.cancel()
+
+    if not done:
+        # Ringing timeout - nobody answered
+        print("\n[!] Call not answered within 40 seconds (Rings but Nobody Answers).")
+        update_record(status="no-answer", response_note="Rings but Nobody Answers", tokens_used=0.3)
+        try:
+            await lk_api.room.delete_room(api.DeleteRoomRequest(room=room_name))
+        except Exception:
+            pass
         await lk_api.aclose()
         await room.disconnect()
-        return
+        return {"success": False, "status": "no-answer", "tokens_used": 0.3}
 
-    # 5. Caller answered! Allow 1.5s for audio channel / phone speaker to settle
+    if call_declined.is_set() and not call_answered.is_set():
+        # User declined or rejected call before answering
+        print("\n[!] Caller disconnected before answering (User declines before picking up).")
+        update_record(status="busy", response_note="User declines before picking up", tokens_used=0.3)
+        try:
+            await lk_api.room.delete_room(api.DeleteRoomRequest(room=room_name))
+        except Exception:
+            pass
+        await lk_api.aclose()
+        await room.disconnect()
+        return {"success": False, "status": "busy", "tokens_used": 0.3}
+
+    # Caller answered!
     answered_time = time.time()
-    print("\n[CONNECTED] Caller answered. Pausing 1.5s for telecom audio channel to settle...")
-    await asyncio.sleep(1.5)
+    update_record(status="answered", response_note=f"Call answered. Playing {course_type} ({language.upper()})...", audio_flow=prompt_filename, tokens_used=1.0)
+    print(f"\n[CONNECTED] Caller answered. Streaming {prompt_filename} into call now...")
+    await asyncio.sleep(0.8)  # Settle audio channel
 
-    print("[*] Playing welcome.wav to caller now...")
-    welcome_path = AUDIO_DIR / "welcome.wav"
+    welcome_task = asyncio.create_task(play_audio_file(audio_source, prompt_path, dtmf_received_event))
 
-    # Play welcome audio while listening for DTMF
-    welcome_task = asyncio.create_task(play_audio_file(audio_source, welcome_path, dtmf_received_event))
+    # Wait for welcome audio to finish OR dtmf to be pressed
+    while not welcome_task.done() and not dtmf_received_event.is_set():
+        if not call_active:
+            break
+        await asyncio.sleep(0.1)
 
-    # Wait for either DTMF keypress or timeout (give 25s window so caller can hear full message + decide)
-    try:
-        await asyncio.wait_for(dtmf_received_event.wait(), timeout=25.0)
-    except asyncio.TimeoutError:
-        print("[*] No DTMF received before timeout.")
+    # If welcome finished and caller still on line, wait up to 4s for keypress
+    if call_active and not dtmf_received_event.is_set():
+        try:
+            await asyncio.wait_for(dtmf_received_event.wait(), timeout=4.0)
+        except asyncio.TimeoutError:
+            print("[*] No DTMF received within 4s after prompt.")
 
     welcome_task.cancel()
     audio_source.clear_queue()
 
     digit = dtmf_digit_holder["digit"]
-    if digit == "1":
-        print("[*] Condition DTMF == 1: Playing audio_1.wav (Sales option)...")
-        audio_history.append("audio_1.wav")
-        await play_audio_file(audio_source, AUDIO_DIR / "audio_1.wav")
-    elif digit == "2":
-        print("[*] Condition DTMF == 2: Playing audio_2.wav (Support option)...")
-        audio_history.append("audio_2.wav")
-        await play_audio_file(audio_source, AUDIO_DIR / "audio_2.wav")
-    elif digit is not None:
-        print(f"[*] Other digit '{digit}': Playing timeout.wav...")
-        audio_history.append("timeout.wav")
-        await play_audio_file(audio_source, AUDIO_DIR / "timeout.wav")
-    else:
-        print("[*] No digit pressed: Playing timeout.wav...")
-        audio_history.append("timeout.wav")
-        await play_audio_file(audio_source, AUDIO_DIR / "timeout.wav")
+    response_note = "Completed"
 
-    # Give 1 second buffer before terminating
-    await asyncio.sleep(1.0)
+    course_name_map = {
+        "bca_internship": "BCA Internship Program",
+        "distance_education": "Online & Distance Education",
+        "deep_courses": "DEEP Courses"
+    }
+    course_name = course_name_map.get(course_type, "Program Details")
+
+    # Only play response audio if caller is still connected
+    if call_active:
+        if digit == "1":
+            print(f"[*] Condition DTMF == 1: Caller pressed 1 for WhatsApp details ({course_name})")
+            audio_history.append(ack_filename)
+            response_note = f"Pressed 1: WhatsApp Details Requested ({course_name})"
+            update_record(dtmf_digit="1", response_note=response_note, audio_flow=f"{prompt_filename} -> {ack_filename}")
+            await play_audio_file(audio_source, ack_path)
+        elif digit:
+            print(f"[*] Caller pressed key '{digit}'")
+            audio_history.append(timeout_filename)
+            response_note = f"Pressed Key {digit}"
+            update_record(dtmf_digit=digit, response_note=response_note, audio_flow=f"{prompt_filename} -> {timeout_filename}")
+            await play_audio_file(audio_source, timeout_path)
+        else:
+            print("[*] No DTMF received (Timeout / Listened).")
+            audio_history.append(timeout_filename)
+            response_note = "Listened to prompt (No key pressed / Timeout)"
+            update_record(dtmf_digit="", response_note=response_note, audio_flow=f"{prompt_filename} -> {timeout_filename}")
+            await play_audio_file(audio_source, timeout_path)
+
+    # Give brief buffer then FORCEFULLY TERMINATE the telephone call
+    await asyncio.sleep(0.5)
     total_duration = time.time() - answered_time
 
-    # Disconnect from room
+    print(f"\n" + "=" * 65)
+    print(f" [AUTOMATIC HANGUP] Terminating telephone call for {target_phone}...")
+    print("=" * 65)
+
+    try:
+        # Delete room sends SIP BYE to Vobiz carrier, hanging up caller's phone immediately!
+        await lk_api.room.delete_room(api.DeleteRoomRequest(room=room_name))
+        print(f"[✓] Room deleted - Phone line hung up successfully!")
+    except Exception as e:
+        print(f"[!] DeleteRoom error: {e}")
+        try:
+            await lk_api.room.remove_participant(
+                api.RoomParticipantIdentity(room=room_name, identity=f"caller_{target_phone}")
+            )
+        except Exception:
+            pass
+
     await room.disconnect()
     await lk_api.aclose()
 
-    # 6. Fetch live billing deduction directly from Vobiz Carrier API
-    print("\n[*] Fetching live billing deduction directly from Vobiz Carrier API...")
-    live_cdr = fetch_live_vobiz_call_cost(to_number=target_phone)
+    # Calculate wholesale cost
+    bill_min = math.ceil(total_duration / 60.0) if total_duration > 0 else 0
+    vobiz_cost = round(bill_min * 0.45, 2)
 
-    if live_cdr:
-        vobiz_cost = live_cdr["live_vobiz_cost"]
-        bill_sec = live_cdr["bill_duration_sec"]
-        call_uuid_actual = live_cdr.get("call_uuid") or sip_call_id
-        currency = live_cdr.get("currency", "INR")
-        billing_source = "Live Vobiz Carrier Ledger"
-        print(f"[+] Live Vobiz Ledger: Billed Duration = {bill_sec}s | Exact Deduction = {vobiz_cost} {currency}")
-    else:
-        bill_min = math.ceil(total_duration / 60.0)
-        vobiz_cost = round(bill_min * 0.45, 2)
-        call_uuid_actual = sip_call_id
-        billing_source = "Telecom Pulse Benchmark"
+    update_record(
+        status="completed",
+        duration_sec=round(total_duration, 1),
+        carrier_cost_inr=vobiz_cost,
+        tokens_used=1.0
+    )
 
-    cost_data = {
-        "duration_seconds": round(total_duration, 2),
-        "billable_pulses_minutes": math.ceil(total_duration / 60.0),
-        "vobiz_telecom_cost_inr": vobiz_cost,
-        "billing_source": billing_source,
-        "ai_stt_cost_inr": 0.00,
-        "ai_llm_cost_inr": 0.00,
-        "ai_tts_cost_inr": 0.00,
-        "total_cost_inr": vobiz_cost,
-        "savings_vs_full_ai_inr": round(math.ceil(total_duration / 60.0) * 3.00 - vobiz_cost, 2)
-    }
-
-    log_entry = {
-        "call_uuid": call_uuid_actual,
-        "from": VOBIZ_OUTBOUND_NUMBER,
-        "to": target_phone,
+    return {
+        "success": True,
         "status": "completed",
-        "start_time_iso": dt_now,
-        "start_time_ts": call_start_time,
-        "dtmf_digit": digit or "None",
-        "audio_played": " -> ".join(audio_history),
-        "cost_breakdown": cost_data
+        "duration_sec": total_duration,
+        "dtmf_digit": digit,
+        "response_note": response_note,
+        "vobiz_cost_inr": vobiz_cost,
+        "tokens_used": 1.0
     }
-    save_log_entry(log_entry)
-    print_cost_summary(log_entry)
 
 
 if __name__ == "__main__":
