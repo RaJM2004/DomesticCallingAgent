@@ -165,55 +165,55 @@ PRESET_TEMPLATES = {
         "name": "01 | BCA Internship Program (English)",
         "file": "bca_internship_en.wav",
         "lang": "en",
-        "default_text": "Hello! This is from PRIDE Online Education, Belagavi. Are you a BCA student looking for an internship? We offer internship program in Python, Java, Artificial Intelligence, Machine Learning, Data Science, and Cyber Security. Both online and offline options are available, along with an internship certificate. Interested in knowing more? Press 1 to receive complete details on WhatsApp. Thank you for your time. Have a great day!"
+        "default_text": "Hello! This Call is from PRIDE Online Education, Belagavi. Are you a BCA student looking for an internship? In Pride Online Education Belagavi we offer internship programs in Python, Java, Artificial Intelligence, Machine Learning, Data Science, and Cyber Security. Both online and offline options are available, along with an internship certificate. Are you Interested in knowing more? Press 1 to receive complete details on WhatsApp. Thank you for your time. Have a great day!"
     },
     "2": {
-        "name": "01 | BCA Internship Program (Hindi)",
+        "name": "01 | BCA Internship Program (Hindi / Hinglish)",
         "file": "bca_internship_hi.wav",
         "lang": "hi",
-        "default_text": "नमस्ते! यह प्राइड ऑनलाइन एजुकेशन, बेलगावी से है। क्या आप बीसीए छात्र हैं और इंटर्नशिप की तलाश में हैं? हम पायथन, जावा, आर्टिफिशियल इंटेलिजेंस, मशीन लर्निंग, डेटा साइंस और साइबर सिक्योरिटी में इंटर्नशिप प्रोग्राम प्रदान करते हैं। ऑनलाइन और ऑफलाइन दोनों विकल्प उपलब्ध हैं, साथ में इंटर्नशिप सर्टिफिकेट भी दिया जाएगा। अधिक जानने के इच्छुक हैं? व्हाट्सएप पर पूरा विवरण प्राप्त करने के लिए 1 दबाएं। आपके समय के लिए धन्यवाद। आपका दिन शुभ हो!"
+        "default_text": "हेलो! यह कॉल PRIDE Online Education, Belagavi से है। क्या आप एक BCA student हैं और internship ढूंढ रहे हैं? Pride Online Education Belagavi में हम Python, Java, Artificial Intelligence, Machine Learning, Data Science, और Cyber Security में internship programs offer करते हैं। Online और offline दोनों options available हैं, साथ में internship certificate भी मिलेगा। क्या आप और जानना चाहते हैं? WhatsApp पर complete details पाने के लिए 1 दबाएं। Thank you आपके time के लिए. Have a great day!"
     },
     "3": {
-        "name": "01 | BCA Internship Program (Kannada)",
+        "name": "01 | BCA Internship Program (Kannada / Kanglish)",
         "file": "bca_internship_kn.wav",
         "lang": "kn",
-        "default_text": "ನಮಸ್ಕಾರ! ಇದು ಪ್ರೈಡ್ ಆನ್‌ಲೈನ್ ಎಜುಕೇಶನ್, ಬೆಳಗಾವಿ. ನೀವು ಇಂಟರ್ನ್‌ಶಿಪ್ ಹುಡುಕುತ್ತಿರುವ ಬಿಸಿಎ ವಿದ್ಯಾರ್ಥಿಯಾಗಿದ್ದೀರಾ? ನಾವು ಪೈಥಾನ್, ಜಾವಾ, ಆರ್ಟಿಫಿಶಿಯಲ್ ಇಂಟೆಲಿಜೆನ್ಸ್, ಮೆಷಿನ್ ಲರ್ನಿಂಗ್, ಡೇಟಾ ಸೈನ್ಸ್ ಮತ್ತು ಸೈಬರ್ ಸೆಕ್ಯುರಿಟಿಗಳಲ್ಲಿ ಇಂಟರ್ನ್‌ಶಿಪ್ ಪ್ರೋಗ್ರಾಂಗಳನ್ನು ಒದಗಿಸುತ್ತೇವೆ. ಆನ್‌ಲೈನ್ ಮತ್ತು ಆಫ್‌ಲೈನ್ ಎರಡೂ ಆಯ್ಕೆಗಳು ಲಭ್ಯವಿದ್ದು, ಇಂಟರ್ನ್‌ಶಿಪ್ ಪ್ರಮಾಣಪತ್ರವೂ ಸಿಗಲಿದೆ. ಹೆಚ್ಚಿನ ಮಾಹಿತಿ ತಿಳಿಯಲು ಆಸಕ್ತಿ ಇದೆಯೇ? ವಾಟ್ಸಾಪ್‌ನಲ್ಲಿ ಸಂಪೂರ್ಣ ವಿವರಗಳನ್ನು ಪಡೆಯಲು 1 ಒತ್ತಿ. ನಿಮ್ಮ ಅಮೂಲ್ಯ ಸಮಯಕ್ಕೆ ಧನ್ಯವಾದಗಳು. ಶುಭ ದಿನ!"
+        "default_text": "ಹಲೋ! ಈ call PRIDE Online Education, Belagavi ಇಂದ. ನೀವು internship ಹುಡುಕುತ್ತಿರುವ BCA student ಆಗಿದ್ದೀರಾ? Pride Online Education Belagavi ನಲ್ಲಿ ನಾವು Python, Java, Artificial Intelligence, Machine Learning, Data Science, ಮತ್ತು Cyber Security ನಲ್ಲಿ internship programs offer ಮಾಡ್ತಿದ್ದೇವೆ. Online ಮತ್ತು offline ಎರಡೂ options available ಇವೆ, ಜೊತೆಗೆ internship certificate ಕೂಡ ಸಿಗುತ್ತೆ. ಹೆಚ್ಚು ತಿಳಿಯಲು interested ಇದ್ದೀರಾ? WhatsApp ನಲ್ಲಿ complete details ಪಡೆಯಲು 1 ಒತ್ತಿ. Thank you ನಿಮ್ಮ ಸಮಯಕ್ಕೆ. Have a great day!"
     },
     "4": {
         "name": "02 | Online & Distance Education (English)",
         "file": "distance_education_en.wav",
         "lang": "en",
-        "default_text": "Hello! This is from PRIDE Online Education, Belagavi. Are you planning to continue your education or complete your degree? We offer S. S. L. C. and P. U. C. through N. I. O. S., along with undergraduate and postgraduate programs such as B. A., B. Com, B. B. A., B. C. A., B. S. C., M. A., M. Com, M. B. A., and M. C. A. You can learn at your own pace with flexible study options, affordable fees, and complete admission guidance. Would you like to know more about the courses? Press 1 to receive details on WhatsApp. Thank you, and have a wonderful day."
+        "default_text": "Hello! This Call is from PRIDE Online Education, Belagavi. Are you planning to continue your education or complete your degree? In PRIDE Online Education, Belagavi We offer SSLC and PUC through NIOS, with undergraduate programs like B.A, B.S.C, B.B.A, B.Com,and B.C.A , as well as postgraduate programs like M.A, M.Com, M.B.A, and M.C.A. You can learn at your own pace with flexible study options, affordable fees, and complete admission guidance. Would you like to know more about the courses? Press 1 to receive details on WhatsApp. Thank you, and have a wonderful day."
     },
     "5": {
-        "name": "02 | Online & Distance Education (Hindi)",
+        "name": "02 | Online & Distance Education (Hindi / Hinglish)",
         "file": "distance_education_hi.wav",
         "lang": "hi",
-        "default_text": "नमस्ते! यह प्राइड ऑनलाइन एजुकेशन, बेलगावी से है। क्या आप अपनी शिक्षा जारी रखने या अपनी डिग्री पूरी करने की योजना बना रहे हैं? हम एन. आई. ओ. एस. के माध्यम से एस. एस. एल. सी. और पी. यू. सी., तथा बी. ए., बी. कॉम, बी. बी. ए., बी. सी. ए., बी. एस. सी., एम. ए., एम. कॉम, एम. बी. ए., और एम. सी. ए. जैसे स्नातक और स्नातकोत्तर पाठ्यक्रम प्रदान करते हैं। आप लचीले अध्ययन विकल्पों, किफायती फीस और पूर्ण प्रवेश मार्गदर्शन के साथ अपनी गति से सीख सकते हैं। क्या आप कोर्सेस के बारे में अधिक जानना चाहते हैं? व्हाट्सएप पर विवरण प्राप्त करने के लिए 1 दबाएं। धन्यवाद, आपका दिन शुभ हो।"
+        "default_text": "हेलो! यह कॉल प्राइड ऑनलाइन एजुकेशन, बेलगावी से है। क्या आप अपनी education continue करने या degree complete करने की सोच रहे हैं? प्राइड ऑनलाइन एजुकेशन, बेलगावी में हम NIOS के through SSLC और PUC, undergraduate programs जैसे B.A, B.S.C, B.B.A, B.Com, B.C.A, और postgraduate programs जैसे M.A, M.Com, M.B.A, और M.C.A offer करते हैं। आप flexible study options, affordable fees, और complete admission guidance के साथ अपनी pace पर learn कर सकते हैं। क्या आप courses के बारे में और जानना चाहते हैं? WhatsApp पर details पाने के लिए 1 दबाएं। Thank you, and have a wonderful day!"
     },
     "6": {
-        "name": "02 | Online & Distance Education (Kannada)",
+        "name": "02 | Online & Distance Education (Kannada / Kanglish)",
         "file": "distance_education_kn.wav",
         "lang": "kn",
-        "default_text": "ನಮಸ್ಕಾರ! ಇದು ಪ್ರೈಡ್ ಆನ್‌ಲೈನ್ ಎಜುಕೇಶನ್, ಬೆಳಗಾವಿ. ನೀವು ನಿಮ್ಮ ಶಿಕ್ಷಣವನ್ನು ಮುಂದುವರಿಸಲು ಅಥವಾ ನಿಮ್ಮ ಪದವಿಯನ್ನು ಪೂರ್ಣಗೊಳಿಸಲು ಯೋಜಿಸುತ್ತಿದ್ದೀರಾ? ನಾವು ಎನ್. ಐ. ಓ. ಎಸ್. ಮೂಲಕ ಎಸ್. ಎಸ್. ಎಲ್. ಸಿ. ಮತ್ತು ಪಿ. ಯು. ಸಿ., ಹಾಗೂ ಬಿ. ಎ., ಬಿ. ಕಾಂ., ಬಿ. ಬಿ. ಎ., ಬಿ. ಸಿ. ಎ., ಬಿ. ಎಸ್. ಸಿ., ಎಂ. ಎ., ಎಂ. ಕಾಂ., ಎಂ. ಬಿ. ಎ., ಮತ್ತು ಎಂ. ಸಿ. ಎ. ಪದವಿ ಮತ್ತು ಸ್ನಾತಕೋತ್ತರ ಕೋರ್ಸ್‌ಗಳನ್ನು ಒದಗಿಸುತ್ತೇವೆ. ಕೈಗೆಟುಕುವ ಶುಲ್ಕ ಮತ್ತು ಸಂಪೂರ್ಣ ಪ್ರವೇಶ ಮಾರ್ಗದರ್ಶನದೊಂದಿಗೆ ನೀವು ನಿಮ್ಮದೇ ಆದ ಸಮಯದಲ್ಲಿ ಕಲಿಯಬಹುದು. ಕೋರ್ಸ್‌ಗಳ ಬಗ್ಗೆ ಹೆಚ್ಚಿನ ಮಾಹಿತಿ ತಿಳಿಯಲು ಬಯಸುವಿರಾ? ವಾಟ್ಸಾಪ್‌ನಲ್ಲಿ ವಿವರಗಳನ್ನು ಪಡೆಯಲು 1 ಒತ್ತಿ. ಧನ್ಯವಾದಗಳು, ಶುಭ ದಿನ."
+        "default_text": "ಹಲೋ! ಈ call PRIDE Online Education, Belagavi ಇಂದ. ನೀವು ನಿಮ್ಮ education continue ಮಾಡಲು ಅಥವಾ degree complete ಮಾಡಲು plan ಮಾಡ್ತಿದ್ದೀರಾ? PRIDE Online Education, Belagavi ನಲ್ಲಿ ನಾವು NIOS ಮೂಲಕ SSLC ಮತ್ತು PUC, undergraduate programs ಆದ B A, B Com, B B A, B C A, B S C, ಹಾಗೆಯೇ postgraduate programs ಆದ M A, M Com, M B A, ಮತ್ತು M C A offer ಮಾಡ್ತಿದ್ದೇವೆ. Flexible study options, affordable fees, ಮತ್ತು complete admission guidance ನೊಂದಿಗೆ ನೀವು ನಿಮ್ಮದೇ speed ನಲ್ಲಿ ಕಲಿಯಬಹುದು. Courses ಬಗ್ಗೆ ಹೆಚ್ಚು ತಿಳಿಯಲು interested ಇದ್ದೀರಾ? WhatsApp ನಲ್ಲಿ details ಪಡೆಯಲು 1 ಒತ್ತಿ. Thank you, and have a wonderful day!"
     },
     "7": {
         "name": "03 | DEEP Courses (English)",
         "file": "deep_courses_en.wav",
         "lang": "en",
-        "default_text": "Hello! This is from PRIDE Online Education, Belagavi. Are you interested to learn advance computer and professional skills? We offer over 250 plus online courses through DEEP, including Programming, Hardware and Networking, Graphic Designing, and career-oriented training. Learn from home, at your own pace, with affordable fees. Flat 50% off on all courses. Interested in exploring the courses? Press 1 to receive the course list and details on WhatsApp. Thank you for your time. Have a great day!"
+        "default_text": "Hello! This Call is from PRIDE Online Education, Belagavi. Are you interested to learn advanced computer and professional skills? In PRIDE Online Education, Belagavi We offer over 250 plus online courses through DEEP, including Programming, Hardware and Networking, Graphic Designing, and career-oriented training. Learn from home, at your own pace, with affordable fees. Flat 50% off on all courses. Interested in exploring the courses? Press 1 to receive the course list and details on WhatsApp. Thank you for your time. Have a great day!"
     },
     "8": {
-        "name": "03 | DEEP Courses (Hindi)",
+        "name": "03 | DEEP Courses (Hindi / Hinglish)",
         "file": "deep_courses_hi.wav",
         "lang": "hi",
-        "default_text": "नमस्ते! यह प्राइड ऑनलाइन एजुकेशन, बेलगावी से है। क्या आप एडवांस कंप्यूटर और प्रोफेशनल स्किल्स सीखने में रुचि रखते हैं? हम डीप प्रोग्राम के माध्यम से 250 से अधिक ऑनलाइन कोर्सेस प्रदान करते हैं, जिनमें प्रोग्रामिंग, हार्डवेयर और नेटवर्किंग, ग्राफिक डिजाइनिंग और करियर-ओरिएंटेड ट्रेनिंग शामिल हैं। घर से, अपनी गति से, किफायती फीस में सीखें। सभी कोर्सेस पर फ्लैट 50% छूट उपलब्ध है। कोर्सेस जानने के इच्छुक हैं? व्हाट्सएप पर कोर्स लिस्ट और विवरण प्राप्त करने के लिए 1 दबाएं। आपके समय के लिए धन्यवाद। आपका दिन शुभ हो!"
+        "default_text": "हेलो! यह कॉल PRIDE Online Education, Belagavi से है। क्या आप advanced computer और professional skills सीखना चाहते हैं? PRIDE Online Education, Belagavi में हम DEEP के through 250 plus online courses offer करते हैं, जिसमें Programming, Hardware and Networking, Graphic Designing, और career-oriented training शामिल हैं। घर बैठे, अपनी pace पर, affordable fees में सीखें। सभी courses पर flat 50% off है। क्या आप courses explore करना चाहते हैं? WhatsApp पर course list और details पाने के लिए 1 दबाएं। Thank you आपके time के लिए. Have a great day!"
     },
     "9": {
-        "name": "03 | DEEP Courses (Kannada)",
+        "name": "03 | DEEP Courses (Kannada / Kanglish)",
         "file": "deep_courses_kn.wav",
         "lang": "kn",
-        "default_text": "ನಮಸ್ಕಾರ! ಇದು ಪ್ರೈಡ್ ಆನ್‌ಲೈನ್ ಎಜುಕೇಶನ್, ಬೆಳಗಾವಿ. ನೀವು ಸುಧಾರಿತ ಕಂಪ್ಯೂಟರ್ ಮತ್ತು ವೃತ್ತಿಪರ ಕೌಶಲ್ಯಗಳನ್ನು ಕಲಿಯಲು ಆಸಕ್ತಿ ಹೊಂದಿದ್ದೀರಾ? ನಾವು ಡೀಪ್ ಪ್ರೋಗ್ರಾಂ ಮೂಲಕ ಪ್ರೋಗ್ರಾಮಿಂಗ್, ಹಾರ್ಡ್‌ವೇರ್ ಮತ್ತು ನೆಟ್‌ವರ್ಕಿಂಗ್, ಗ್ರಾಫಿಕ್ ಡಿಸೈನಿಂಗ್ ಮತ್ತು ವೃತ್ತಿ ಆಧಾರಿತ ತರಬೇತಿ ಸೇರಿದಂತೆ 250 ಕ್ಕೂ ಹೆಚ್ಚು ಆನ್‌ಲೈನ್ ಕೋರ್ಸ್‌ಗಳನ್ನು ಒದಗಿಸುತ್ತೇವೆ. ಮನೆಯಿಂದಲೇ, ನಿಮ್ಮದೇ ಸಮಯದಲ್ಲಿ, ಕೈಗೆಟುಕುವ ಶುಲ್ಕದಲ್ಲಿ ಕಲಿಯಿರಿ. ಎಲ್ಲಾ ಕೋರ್ಸ್‌ಗಳ ಮೇಲೆ ಫ್ಲಾಟ್ 50% ರಿಯಾಯಿತಿ ಇದೆ. ಕೋರ್ಸ್‌ಗಳನ್ನು ತಿಳಿದುಕೊಳ್ಳಲು ಆಸಕ್ತಿ ಇದೆಯೇ? ವಾಟ್ಸಾಪ್‌ನಲ್ಲಿ ಕೋರ್ಸ್ ಪಟ್ಟಿ ಮತ್ತು ವಿವರಗಳನ್ನು ಪಡೆಯಲು 1 ಒತ್ತಿ. ನಿಮ್ಮ ಅಮೂಲ್ಯ ಸಮಯಕ್ಕೆ ಧನ್ಯವಾದಗಳು. ಶುಭ ದಿನ!"
+        "default_text": "ಹಲೋ! ಈ call PRIDE Online Education, Belagavi ಇಂದ. ನೀವು advanced computer ಮತ್ತು professional skills ಕಲಿಯಲು interested ಇದ್ದೀರಾ? PRIDE Online Education, Belagavi ನಲ್ಲಿ ನಾವು DEEP ಮೂಲಕ Programming, Hardware and Networking, Graphic Designing, ಮತ್ತು career-oriented training ಸೇರಿದಂತೆ 250 plus online courses offer ಮಾಡ್ತಿದ್ದೇವೆ. ಮನೆಯಿಂದಲೇ, ನಿಮ್ಮದೇ speed ನಲ್ಲಿ, affordable fees ನಲ್ಲಿ ಕಲಿಯಿರಿ. ಎಲ್ಲಾ courses ಮೇಲೆ flat 50% discount ಇದೆ. Courses explore ಮಾಡಲು interested ಇದ್ದೀರಾ? WhatsApp ನಲ್ಲಿ course list ಮತ್ತು details ಪಡೆಯಲು 1 ಒತ್ತಿ. Thank you ನಿಮ್ಮ ಸಮಯಕ್ಕೆ. Have a great day!"
     },
     "10": {
         "name": "Acknowledgment - Press 1 (English)",
