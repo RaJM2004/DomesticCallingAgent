@@ -1,9 +1,15 @@
 import os
+import secrets
+import bcrypt
 from datetime import datetime
 from sqlalchemy import create_engine, Column, Integer, String, Float, DateTime, ForeignKey, Text, event
 from sqlalchemy.orm import declarative_base, sessionmaker, relationship
 
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./calling_campaign.db")
+
+# Normalize Railway's legacy postgres:// prefix to postgresql:// for SQLAlchemy
+if DATABASE_URL.startswith("postgres://"):
+    DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
 
 # For SQLite, enable WAL mode and configure connect args
 connect_args = {}
@@ -26,16 +32,50 @@ SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
 
+# -------------------------------------------------------------
+# Security & Auth Helpers
+# -------------------------------------------------------------
+def hash_password(password: str) -> str:
+    """Generate secure bcrypt password hash (max 72 bytes)."""
+    if not password:
+        return ""
+    pwd_bytes = password.encode("utf-8")[:72]
+    return bcrypt.hashpw(pwd_bytes, bcrypt.gensalt(rounds=12)).decode("utf-8")
+
+
+def verify_password(plain_password: str, hashed_password: str) -> bool:
+    """Verify plain text password against bcrypt hash."""
+    if not plain_password or not hashed_password:
+        return False
+    try:
+        pwd_bytes = plain_password.encode("utf-8")[:72]
+        return bcrypt.checkpw(pwd_bytes, hashed_password.encode("utf-8"))
+    except Exception:
+        return False
+
+
+def generate_api_token() -> str:
+    """Generate a high-entropy secret bearer token for API/user sessions."""
+    return f"vobiz_tok_{secrets.token_urlsafe(32)}"
+
+
+# -------------------------------------------------------------
+# Models
+# -------------------------------------------------------------
 class Account(Base):
     __tablename__ = "accounts"
 
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String(100), default="Client Account")
     email = Column(String(100), default="client@example.com")
+    username = Column(String(50), unique=True, index=True, nullable=True)
+    password_hash = Column(String(255), nullable=True)
+    api_token = Column(String(100), unique=True, index=True, nullable=True)
     role = Column(String(20), default="client")  # 'admin' or 'client'
-    credits = Column(Float, default=30000.0)     # Default 30,000 credits allocated (supports decimal deductions like 0.3)
+    credits = Column(Float, default=30000.0)     # Allocated call credits/tokens
     total_calls_made = Column(Integer, default=0)
     vobiz_wallet_balance = Column(Float, default=500.0) # Vobiz carrier recharge balance in INR
+    is_active = Column(Integer, default=1)       # 1 = active, 0 = disabled
     created_at = Column(DateTime, default=datetime.utcnow)
 
     campaigns = relationship("Campaign", back_populates="account", cascade="all, delete-orphan")
@@ -84,10 +124,13 @@ class CallRecord(Base):
     campaign = relationship("Campaign", back_populates="calls")
 
 
+# -------------------------------------------------------------
+# Database Initialization & Auto-Migration
+# -------------------------------------------------------------
 def init_db():
     Base.metadata.create_all(bind=engine)
 
-    # Auto-migration for existing SQLite database to add columns if missing
+    # Auto-migration for existing SQLite / PostgreSQL database to add columns if missing
     with engine.connect() as conn:
         from sqlalchemy import text
         for col_sql in [
@@ -95,7 +138,11 @@ def init_db():
             "ALTER TABLE call_records ADD COLUMN course_type VARCHAR(50) DEFAULT 'bca_internship'",
             "ALTER TABLE call_records ADD COLUMN language VARCHAR(20) DEFAULT 'en'",
             "ALTER TABLE campaigns ADD COLUMN course_type VARCHAR(50) DEFAULT 'bca_internship'",
-            "ALTER TABLE campaigns ADD COLUMN language VARCHAR(20) DEFAULT 'en'"
+            "ALTER TABLE campaigns ADD COLUMN language VARCHAR(20) DEFAULT 'en'",
+            "ALTER TABLE accounts ADD COLUMN username VARCHAR(50)",
+            "ALTER TABLE accounts ADD COLUMN password_hash VARCHAR(255)",
+            "ALTER TABLE accounts ADD COLUMN api_token VARCHAR(100)",
+            "ALTER TABLE accounts ADD COLUMN is_active INTEGER DEFAULT 1"
         ]:
             try:
                 conn.execute(text(col_sql))
@@ -105,16 +152,53 @@ def init_db():
 
     db = SessionLocal()
     try:
-        # Seed default admin and client account if not present
-        admin = db.query(Account).filter(Account.role == "admin").first()
+        # Seed or backfill default admin account
+        admin = db.query(Account).filter((Account.role == "admin") | (Account.username == "admin")).first()
         if not admin:
-            admin = Account(name="Super Admin", email="admin@vobiz.ai", role="admin", credits=100000.0)
+            admin = Account(
+                name="Super Admin",
+                email="admin@vobiz.ai",
+                username="admin",
+                password_hash=hash_password("admin123"),
+                api_token=generate_api_token(),
+                role="admin",
+                credits=100000.0,
+                is_active=1
+            )
             db.add(admin)
+        else:
+            if not admin.username:
+                admin.username = "admin"
+            if not admin.password_hash:
+                admin.password_hash = hash_password("admin123")
+            if not admin.api_token:
+                admin.api_token = generate_api_token()
+            if admin.is_active is None:
+                admin.is_active = 1
 
-        client = db.query(Account).filter(Account.role == "client").first()
+        # Seed or backfill default client account
+        client = db.query(Account).filter((Account.role == "client") | (Account.username == "user")).first()
         if not client:
-            client = Account(name="Main Client", email="client@vobiz.ai", role="client", credits=30000.0)
+            client = Account(
+                name="Main Client",
+                email="client@vobiz.ai",
+                username="user",
+                password_hash=hash_password("user123"),
+                api_token=generate_api_token(),
+                role="client",
+                credits=30000.0,
+                is_active=1
+            )
             db.add(client)
+        else:
+            if not client.username:
+                client.username = "user"
+            if not client.password_hash:
+                client.password_hash = hash_password("user123")
+            if not client.api_token:
+                client.api_token = generate_api_token()
+            if client.is_active is None:
+                client.is_active = 1
 
         db.commit()
     finally:

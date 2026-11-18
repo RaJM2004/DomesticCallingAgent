@@ -2,3 +2,8 @@
 .env
 __pycache__/
 *.pyc
+*.pyo
+*.pyd
+*.db-shm
+*.db-wal
+exports/*.xlsx

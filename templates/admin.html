@@ -215,6 +215,47 @@
             font-weight: 600;
         }
 
+        /* Modal Styles */
+        .modal-overlay {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(43, 35, 32, 0.5);
+            backdrop-filter: blur(4px);
+            display: none; align-items: center; justify-content: center;
+            z-index: 10000; padding: 20px;
+        }
+        .modal-card {
+            background: #ffffff; border: 1px solid var(--card-border);
+            border-radius: var(--radius-lg); width: 100%; max-width: 520px;
+            padding: 28px; box-shadow: 0 20px 40px rgba(0,0,0,0.15);
+        }
+        .modal-header {
+            display: flex; justify-content: space-between; align-items: center;
+            margin-bottom: 20px; padding-bottom: 12px; border-bottom: 1px solid var(--card-border);
+        }
+        .modal-header h3 { font-size: 18px; font-weight: 800; color: var(--text-main); }
+        .modal-close {
+            background: transparent; border: none; font-size: 20px;
+            cursor: pointer; color: var(--text-muted);
+        }
+        .form-row { margin-bottom: 14px; }
+        .form-row label { display: block; font-size: 12px; font-weight: 700; text-transform: uppercase; color: var(--text-muted); margin-bottom: 6px; }
+        .form-row input, .form-row select {
+            width: 100%; padding: 10px 12px; border: 1px solid var(--card-border);
+            border-radius: 8px; font-size: 14px; font-family: inherit;
+        }
+        .form-row input:focus, .form-row select:focus {
+            outline: none; border-color: var(--primary);
+        }
+        .btn-sm {
+            padding: 5px 10px; font-size: 11px; font-weight: 700; border-radius: 6px;
+            cursor: pointer; border: 1px solid transparent; text-decoration: none; display: inline-flex; align-items: center; gap: 4px;
+        }
+
+        .badge-active { background: var(--success-tint); color: var(--success); padding: 3px 8px; border-radius: 4px; font-weight: 700; font-size: 11px; }
+        .badge-disabled { background: var(--danger-tint); color: var(--danger); padding: 3px 8px; border-radius: 4px; font-weight: 700; font-size: 11px; }
+        .badge-role-admin { background: rgba(219, 139, 112, 0.15); color: var(--primary); border: 1px solid var(--primary); padding: 2px 7px; border-radius: 4px; font-weight: 700; font-size: 11px; }
+        .badge-role-client { background: #f1f5f9; color: #475569; border: 1px solid #cbd5e1; padding: 2px 7px; border-radius: 4px; font-weight: 700; font-size: 11px; }
+
         @media (max-width: 900px) {
             .stats-grid, .layout-two-col { grid-template-columns: 1fr; }
         }
@@ -225,20 +266,28 @@
         <!-- Admin Header -->
         <header>
             <div class="brand-wrap">
-                <div class="brand-icon">🛡️</div>
+                <a href="https://prideonlineedu.com/" target="_blank" rel="noopener noreferrer" title="Visit PRIDE Online Education" style="background:#ffffff; border:1px solid var(--card-border); padding:6px 14px; border-radius:12px; display:flex; align-items:center; justify-content:center; box-shadow:0 2px 6px rgba(0,0,0,0.03); text-decoration:none; transition:transform 0.2s;" onmouseover="this.style.transform='scale(1.04)'" onmouseout="this.style.transform='scale(1)'">
+                    <img src="/static/pride-logo.png" alt="PRIDE Education" style="height:38px; width:auto; object-fit:contain;">
+                </a>
                 <div>
                     <h1 style="font-size:20px; font-weight:800; color:var(--text-main);">Admin Telephony & Financial Dashboard</h1>
                     <p style="color:var(--text-muted); font-size:13px; margin-top:2px;">Real-time balance fetched live from Vobiz carrier account & client credit quota</p>
                 </div>
             </div>
 
-            <div style="display:flex; align-items:center; gap:16px;">
+            <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
                 <div class="live-pulse">
                     <span class="pulse-dot"></span>
                     <span>Live Syncing</span>
                 </div>
                 <span class="admin-badge">Admin Access</span>
-                <a href="/" style="color:var(--primary); font-size:13px; text-decoration:none; font-weight:700;">Switch to User View →</a>
+                <span style="font-size:12px; font-weight:700; color:var(--text-main); background:var(--surface-warm); border:1px solid #fed7aa; padding:6px 12px; border-radius:8px;">
+                    👤 {{ADMIN_NAME}}
+                </span>
+                <a href="/" style="color:var(--primary); font-size:13px; text-decoration:none; font-weight:700;">User Portal →</a>
+                <a href="/logout" class="btn btn-outline" style="padding:6px 14px; font-size:12px; text-decoration:none; color:var(--danger); border-color:var(--danger);">
+                    Logout 🚪
+                </a>
             </div>
         </header>
 
@@ -340,6 +389,42 @@
             </div>
         </div>
 
+        <!-- User Accounts & Access Tokens Management Card -->
+        <div class="card" style="margin-bottom: 24px;">
+            <div class="card-header" style="flex-wrap: wrap; gap: 10px;">
+                <div>
+                    <h2>👥 User Accounts, Credentials & Access Tokens</h2>
+                    <p style="font-size: 13px; color: var(--text-muted); margin-top: 2px;">
+                        Manage client logins, provision API/Access tokens, and allocate outbound calling credits.
+                    </p>
+                </div>
+                <button class="btn" onclick="openCreateUserModal()" style="display:inline-flex; align-items:center; gap:6px;">
+                    <span>➕</span> Add New User
+                </button>
+            </div>
+
+            <div class="table-wrap">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>ID</th>
+                            <th>Username</th>
+                            <th>Name & Email</th>
+                            <th>Role</th>
+                            <th>Credits Remaining</th>
+                            <th>Calls Made</th>
+                            <th>Access Token</th>
+                            <th>Status</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="usersTableBody">
+                        <tr><td colspan="9" style="text-align:center; padding:20px; color:var(--text-muted);">Loading user accounts...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
         <!-- Live Vobiz Carrier CDR Table -->
         <div class="card">
             <div class="card-header">
@@ -365,6 +450,110 @@
                 </table>
             </div>
         </div>
+
+        <!-- Footer -->
+        <footer style="margin-top: 36px; padding: 22px 0; text-align: center; border-top: 1px solid var(--card-border); font-size: 13px; color: var(--text-muted); font-weight: 600; display:flex; align-items:center; justify-content:center; gap:8px; flex-wrap:wrap;">
+            <a href="https://prideonlineedu.com/" target="_blank" rel="noopener noreferrer" style="color:var(--text-muted); text-decoration:none; transition:color 0.2s;" onmouseover="this.style.color='var(--primary)'" onmouseout="this.style.color='var(--text-muted)'">PRIDE Online Education & Exam Center Belagavi</a>
+            <span>•</span>
+            <span>Powered by</span>
+            <a href="https://anvriksh.com" target="_blank" rel="noopener noreferrer" style="display:inline-flex; align-items:center; gap:6px; color:var(--text-main); font-weight:800; text-decoration:none; letter-spacing:0.2px; transition:color 0.2s;" onmouseover="this.style.color='var(--primary)'" onmouseout="this.style.color='var(--text-main)'">
+                <img src="/static/anvriksh-logo.png" alt="ANVRiksh" style="height:28px; width:auto; object-fit:contain; vertical-align:middle;">
+                <span>ANVRiksh</span>
+            </a>
+        </footer>
+    </div>
+
+    <!-- Modal: Create New User -->
+    <div id="createUserModal" class="modal-overlay">
+        <div class="modal-card">
+            <div class="modal-header">
+                <h3>➕ Create New Client / User Account</h3>
+                <button class="modal-close" onclick="closeCreateUserModal()">&times;</button>
+            </div>
+            <form onsubmit="submitCreateUser(event)">
+                <div class="form-row">
+                    <label>Username (used for login)</label>
+                    <input type="text" id="newUsername" placeholder="e.g. john_corp" required autocomplete="off">
+                </div>
+                <div class="form-row">
+                    <label>Password</label>
+                    <input type="password" id="newPassword" placeholder="Create password" required autocomplete="new-password">
+                </div>
+                <div class="form-row">
+                    <label>Full Name / Company Name</label>
+                    <input type="text" id="newName" placeholder="e.g. John Doe - Tech Corp" required>
+                </div>
+                <div class="form-row">
+                    <label>Email Address</label>
+                    <input type="email" id="newEmail" placeholder="e.g. john@techcorp.com" required>
+                </div>
+                <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px;">
+                    <div class="form-row">
+                        <label>Account Role</label>
+                        <select id="newRole">
+                            <option value="client" selected>Client / User</option>
+                            <option value="admin">Administrator</option>
+                        </select>
+                    </div>
+                    <div class="form-row">
+                        <label>Initial Calling Credits</label>
+                        <input type="number" id="newCredits" value="5000" min="0" step="500">
+                    </div>
+                </div>
+                <div style="display:flex; justify-content:flex-end; gap:10px; margin-top:20px;">
+                    <button type="button" class="btn btn-outline" onclick="closeCreateUserModal()">Cancel</button>
+                    <button type="submit" class="btn">Create Account & Issue Token →</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Modal: Set User Credits -->
+    <div id="editCreditsModal" class="modal-overlay">
+        <div class="modal-card">
+            <div class="modal-header">
+                <h3>🪙 Set User Call Credits</h3>
+                <button class="modal-close" onclick="closeSetCreditsModal()">&times;</button>
+            </div>
+            <form onsubmit="submitSetCredits(event)">
+                <input type="hidden" id="creditTargetUserId">
+                <div style="margin-bottom:14px; font-size:13px; color:var(--text-muted);">
+                    Adjust credit quota for <strong id="creditTargetUsername" style="color:var(--text-main);"></strong>:
+                </div>
+                <div class="form-row">
+                    <label>Total Credits Balance</label>
+                    <input type="number" id="creditNewAmount" step="100" min="0" required>
+                </div>
+                <div style="display:flex; justify-content:flex-end; gap:10px; margin-top:20px;">
+                    <button type="button" class="btn btn-outline" onclick="closeSetCreditsModal()">Cancel</button>
+                    <button type="submit" class="btn">Save Credits Balance</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Modal: Reset Password -->
+    <div id="resetPasswordModal" class="modal-overlay">
+        <div class="modal-card">
+            <div class="modal-header">
+                <h3>🔑 Reset User Password</h3>
+                <button class="modal-close" onclick="closeResetPasswordModal()">&times;</button>
+            </div>
+            <form onsubmit="submitResetPassword(event)">
+                <input type="hidden" id="pwdTargetUserId">
+                <div style="margin-bottom:14px; font-size:13px; color:var(--text-muted);">
+                    Set a new password for <strong id="pwdTargetUsername" style="color:var(--text-main);"></strong>:
+                </div>
+                <div class="form-row">
+                    <label>New Password</label>
+                    <input type="password" id="pwdNewPassword" placeholder="Enter new password" required autocomplete="new-password">
+                </div>
+                <div style="display:flex; justify-content:flex-end; gap:10px; margin-top:20px;">
+                    <button type="button" class="btn btn-outline" onclick="closeResetPasswordModal()">Cancel</button>
+                    <button type="submit" class="btn">Update Password</button>
+                </div>
+            </form>
+        </div>
     </div>
 
     <div class="toast" id="toastBox">
@@ -379,6 +568,202 @@
             setTimeout(() => { toast.style.display = 'none'; }, 3000);
         }
 
+        // ==========================================
+        // USER ACCOUNTS MANAGEMENT
+        // ==========================================
+        async function fetchUsers() {
+            try {
+                const res = await fetch('/api/admin/users');
+                if (!res.ok) return;
+                const users = await res.json();
+                renderUsersTable(users);
+            } catch (e) {
+                console.error("Error fetching users:", e);
+            }
+        }
+
+        function renderUsersTable(users) {
+            const tbody = document.getElementById('usersTableBody');
+            if (!users || users.length === 0) {
+                tbody.innerHTML = `<tr><td colspan="9" style="text-align:center; padding:20px; color:var(--text-muted);">No users found in database.</td></tr>`;
+                return;
+            }
+
+            let html = '';
+            users.forEach(u => {
+                const roleBadge = u.role === 'admin' 
+                    ? `<span class="badge-role-admin">🛡️ Admin</span>` 
+                    : `<span class="badge-role-client">👤 Client</span>`;
+                const statusBadge = u.is_active === 1 
+                    ? `<span class="badge-active">Active</span>` 
+                    : `<span class="badge-disabled">Disabled</span>`;
+                const tokenMasked = u.api_token ? `${u.api_token.slice(0, 16)}...` : 'No Token';
+
+                html += `
+                    <tr>
+                        <td style="font-weight:700; color:var(--text-muted);">#${u.id}</td>
+                        <td style="font-weight:800; color:var(--text-main); font-family:'JetBrains Mono';">${u.username}</td>
+                        <td>
+                            <div style="font-weight:700;">${u.name}</div>
+                            <div style="font-size:11px; color:var(--text-muted);">${u.email}</div>
+                        </td>
+                        <td>${roleBadge}</td>
+                        <td style="font-family:'JetBrains Mono'; font-weight:800; color:var(--success); font-size:14px;">
+                            ${(u.credits || 0).toLocaleString()} 🪙
+                        </td>
+                        <td style="font-weight:600;">${u.total_calls_made || 0}</td>
+                        <td>
+                            <div style="display:flex; align-items:center; gap:6px;">
+                                <code style="font-family:'JetBrains Mono'; font-size:11px; background:var(--bg-color); padding:3px 6px; border-radius:4px; border:1px solid var(--card-border); max-width:140px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
+                                    ${tokenMasked}
+                                </code>
+                                <button class="btn-sm btn-outline" style="padding:2px 6px; font-size:10px;" onclick="copyToken('${u.api_token}')" title="Copy Token">
+                                    📋 Copy
+                                </button>
+                            </div>
+                        </td>
+                        <td>${statusBadge}</td>
+                        <td>
+                            <div style="display:flex; gap:4px; flex-wrap:wrap;">
+                                <button class="btn-sm btn-outline" onclick="openSetCreditsModal(${u.id}, '${u.username}', ${u.credits})">
+                                    🪙 Credits
+                                </button>
+                                <button class="btn-sm btn-outline" onclick="openResetPasswordModal(${u.id}, '${u.username}')">
+                                    🔑 Password
+                                </button>
+                                <button class="btn-sm btn-outline" onclick="regenerateUserToken(${u.id}, '${u.username}')" title="Generate New Token">
+                                    🔄 Token
+                                </button>
+                                <button class="btn-sm btn-outline" style="color:${u.is_active === 1 ? 'var(--danger)' : 'var(--success)'}; border-color:${u.is_active === 1 ? 'var(--danger)' : 'var(--success)'};" onclick="toggleUserStatus(${u.id}, '${u.username}')">
+                                    ${u.is_active === 1 ? 'Disable' : 'Enable'}
+                                </button>
+                            </div>
+                        </td>
+                    </tr>
+                `;
+            });
+            tbody.innerHTML = html;
+        }
+
+        function copyToken(tok) {
+            if (!tok) return;
+            navigator.clipboard.writeText(tok);
+            showToast('✅ Access Token copied to clipboard!');
+        }
+
+        // Modal Controls
+        function openCreateUserModal() {
+            document.getElementById('createUserModal').style.display = 'flex';
+            document.getElementById('newUsername').focus();
+        }
+        function closeCreateUserModal() {
+            document.getElementById('createUserModal').style.display = 'none';
+        }
+
+        async function submitCreateUser(e) {
+            e.preventDefault();
+            const username = document.getElementById('newUsername').value.trim();
+            const password = document.getElementById('newPassword').value;
+            const name = document.getElementById('newName').value.trim();
+            const email = document.getElementById('newEmail').value.trim();
+            const role = document.getElementById('newRole').value;
+            const credits = parseFloat(document.getElementById('newCredits').value) || 0;
+
+            const res = await fetch('/api/admin/users', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ username, password, name, email, role, credits })
+            });
+
+            const data = await res.json();
+            if (!res.ok) {
+                alert(data.detail || 'Failed to create user');
+                return;
+            }
+
+            showToast(`✅ User '${username}' created successfully!`);
+            closeCreateUserModal();
+            fetchUsers();
+        }
+
+        function openSetCreditsModal(id, uname, currentCredits) {
+            document.getElementById('creditTargetUserId').value = id;
+            document.getElementById('creditTargetUsername').innerText = uname;
+            document.getElementById('creditNewAmount').value = currentCredits;
+            document.getElementById('editCreditsModal').style.display = 'flex';
+        }
+        function closeSetCreditsModal() {
+            document.getElementById('editCreditsModal').style.display = 'none';
+        }
+        async function submitSetCredits(e) {
+            e.preventDefault();
+            const id = document.getElementById('creditTargetUserId').value;
+            const credits = parseFloat(document.getElementById('creditNewAmount').value) || 0;
+
+            const res = await fetch(`/api/admin/users/${id}/credits`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ credits })
+            });
+            if (res.ok) {
+                showToast(`✅ Credits updated to ${credits.toLocaleString()}`);
+                closeSetCreditsModal();
+                fetchUsers();
+                fetchClientStats();
+            }
+        }
+
+        function openResetPasswordModal(id, uname) {
+            document.getElementById('pwdTargetUserId').value = id;
+            document.getElementById('pwdTargetUsername').innerText = uname;
+            document.getElementById('pwdNewPassword').value = '';
+            document.getElementById('resetPasswordModal').style.display = 'flex';
+            document.getElementById('pwdNewPassword').focus();
+        }
+        function closeResetPasswordModal() {
+            document.getElementById('resetPasswordModal').style.display = 'none';
+        }
+        async function submitResetPassword(e) {
+            e.preventDefault();
+            const id = document.getElementById('pwdTargetUserId').value;
+            const new_password = document.getElementById('pwdNewPassword').value;
+
+            const res = await fetch(`/api/admin/users/${id}/reset-password`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ new_password })
+            });
+            const data = await res.json();
+            if (res.ok) {
+                showToast(`✅ Password reset successfully!`);
+                closeResetPasswordModal();
+            } else {
+                alert(data.detail || 'Error resetting password');
+            }
+        }
+
+        async function toggleUserStatus(id, uname) {
+            if (!confirm(`Are you sure you want to toggle active status for ${uname}?`)) return;
+            const res = await fetch(`/api/admin/users/${id}/toggle-status`, { method: 'POST' });
+            if (res.ok) {
+                showToast(`Status updated for ${uname}`);
+                fetchUsers();
+            }
+        }
+
+        async function regenerateUserToken(id, uname) {
+            if (!confirm(`Regenerate access token for ${uname}? Previous token will stop working immediately.`)) return;
+            const res = await fetch(`/api/admin/users/${id}/regenerate-token`, { method: 'POST' });
+            const data = await res.json();
+            if (res.ok) {
+                showToast(`✅ New token generated for ${uname}!`);
+                fetchUsers();
+            }
+        }
+
+        // ==========================================
+        // VOBIZ CARRIER INFO
+        // ==========================================
         async function fetchVobizInfo() {
             try {
                 const res = await fetch('/api/vobiz/account');
@@ -452,6 +837,7 @@
             });
             showToast(`Client credits set to ${val.toLocaleString()}`);
             fetchClientStats();
+            fetchUsers();
         }
 
         async function setCreditsExact(amount) {
@@ -462,6 +848,7 @@
             });
             showToast(`Credits reset to 0`);
             fetchClientStats();
+            fetchUsers();
         }
 
         async function addCredits(amount) {
@@ -472,13 +859,16 @@
             });
             showToast(`Added ${amount.toLocaleString()} credits!`);
             fetchClientStats();
+            fetchUsers();
         }
 
-        // Fetch immediately and poll every 2.5 seconds continuously
+        // Fetch immediately and poll every 4 seconds continuously
         fetchVobizInfo();
         fetchClientStats();
-        setInterval(fetchVobizInfo, 2500);
-        setInterval(fetchClientStats, 2500);
+        fetchUsers();
+        setInterval(fetchVobizInfo, 4000);
+        setInterval(fetchClientStats, 4000);
+        setInterval(fetchUsers, 6000);
     </script>
 </body>
 </html>

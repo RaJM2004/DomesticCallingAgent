@@ -11,11 +11,13 @@ import csv
 import json
 import time
 import math
-from datetime import datetime
+from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
+from typing import Optional
 from pathlib import Path
 from dotenv import load_dotenv
-from fastapi import FastAPI, Request, Response, UploadFile, File, Depends, HTTPException
-from fastapi.responses import HTMLResponse, JSONResponse, FileResponse, StreamingResponse
+from fastapi import FastAPI, Request, Response, UploadFile, File, Depends, HTTPException, status
+from fastapi.responses import HTMLResponse, JSONResponse, FileResponse, StreamingResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
@@ -24,11 +26,36 @@ import openpyxl
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from sqlalchemy.orm import Session
 
-from database import init_db, get_db, SessionLocal, Account, Campaign, CallRecord
+from database import (
+    init_db, get_db, SessionLocal, Account, Campaign, CallRecord,
+    hash_password, verify_password, generate_api_token
+)
 from dialer_engine import start_campaign_dialer, pause_campaign_dialer, stop_campaign_dialer
 from vobiz_service import get_vobiz_account_details
 
 load_dotenv()
+
+# Timezone Configuration (Indian Standard Time: UTC+05:30)
+try:
+    IST_TZ = ZoneInfo("Asia/Kolkata")
+except Exception:
+    IST_TZ = timezone.utc
+
+def format_datetime_ist(dt: Optional[datetime], fmt: str = "%I:%M:%S %p") -> str:
+    """Converts UTC datetime from database into localized IST string."""
+    if not dt:
+        return ""
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(IST_TZ).strftime(fmt)
+
+def format_datetime_iso(dt: Optional[datetime]) -> str:
+    """Formats datetime as ISO 8601 UTC string for client-side localization."""
+    if not dt:
+        return ""
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.isoformat()
 
 # Initialize DB tables and seed default accounts
 init_db()
@@ -42,16 +69,42 @@ AUDIO_DIR.mkdir(exist_ok=True)
 TEMPLATES_DIR = BASE_DIR / "templates"
 EXPORTS_DIR = BASE_DIR / "exports"
 EXPORTS_DIR.mkdir(exist_ok=True)
+STATIC_DIR = BASE_DIR / "static"
+STATIC_DIR.mkdir(exist_ok=True)
 
-# Mount audio directory
+# Mount static and audio directories
 app.mount("/audio", StaticFiles(directory=str(AUDIO_DIR)), name="audio")
+app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
 SERVER_BASE_URL = os.getenv("SERVER_BASE_URL", "http://localhost:8000").rstrip("/")
 VOBIZ_PER_MINUTE_RATE = float(os.getenv("VOBIZ_PER_MINUTE_RATE", 0.45))  # INR 0.45 carrier rate
 VOBIZ_OUTBOUND_NUMBER = os.getenv("VOBIZ_OUTBOUND_NUMBER", "+917965853227")
 
 
-# Pydantic models
+# ==========================================
+# AUTH & USER PYDANTIC MODELS
+# ==========================================
+class LoginModel(BaseModel):
+    username: str
+    password: str
+
+class TokenLoginModel(BaseModel):
+    token: str
+
+class CreateUserModel(BaseModel):
+    username: str
+    password: str
+    name: str = "Client User"
+    email: str = "user@example.com"
+    role: str = "client"
+    credits: float = 5000.0
+
+class UserCreditUpdateModel(BaseModel):
+    credits: float
+
+class ResetPasswordModel(BaseModel):
+    new_password: str
+
 class CreditUpdateModel(BaseModel):
     credits: float
 
@@ -63,27 +116,283 @@ class WalletRechargeModel(BaseModel):
 
 
 # ==========================================
-# 1. FRONTEND DASHBOARDS (SEPARATE USER & ADMIN)
+# AUTH DEPENDENCIES
 # ==========================================
-@app.get("/", response_class=HTMLResponse)
-def user_portal():
-    """Client / User Interface: Upload 30k numbers, auto-dialer, credit view, response logs."""
-    html_file = TEMPLATES_DIR / "user.html"
+def get_current_user_optional(request: Request, db: Session = Depends(get_db)) -> Optional[Account]:
+    """Retrieve logged-in user from HTTP-only cookie, Bearer header, or X-API-Token."""
+    token = request.cookies.get("vobiz_session_token")
+    if not token:
+        auth_hdr = request.headers.get("Authorization")
+        if auth_hdr and auth_hdr.startswith("Bearer "):
+            token = auth_hdr.split(" ", 1)[1].strip()
+    if not token:
+        token = request.headers.get("X-API-Token")
+    if not token:
+        return None
+    return db.query(Account).filter(Account.api_token == token, Account.is_active == 1).first()
+
+
+def get_current_user(request: Request, db: Session = Depends(get_db)) -> Account:
+    """Strict dependency for protected routes; raises 401 if unauthenticated."""
+    user = get_current_user_optional(request, db)
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Authentication required. Please sign in."
+        )
+    return user
+
+
+def require_admin(user: Account = Depends(get_current_user)) -> Account:
+    """Strict dependency for admin-only routes; raises 403 if role is not admin."""
+    if user.role != "admin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Administrator access required."
+        )
+    return user
+
+
+# ==========================================
+# 1. FRONTEND DASHBOARDS (ROLE-BASED & PROTECTED)
+# ==========================================
+@app.get("/login", response_class=HTMLResponse)
+def login_page(request: Request, db: Session = Depends(get_db)):
+    """Render login UI. If already authenticated, redirect to proper dashboard."""
+    user = get_current_user_optional(request, db)
+    if user:
+        if user.role == "admin":
+            return RedirectResponse(url="/admin", status_code=302)
+        return RedirectResponse(url="/", status_code=302)
+    html_file = TEMPLATES_DIR / "login.html"
     if html_file.exists():
         with open(html_file, "r", encoding="utf-8") as f:
             return f.read()
+    return "<h1>Login template not found.</h1>"
+
+
+@app.get("/", response_class=HTMLResponse)
+def user_portal(request: Request, db: Session = Depends(get_db)):
+    """Client / User Interface: Upload 30k numbers, auto-dialer, credit view, response logs."""
+    user = get_current_user_optional(request, db)
+    if not user:
+        return RedirectResponse(url="/login", status_code=302)
+    html_file = TEMPLATES_DIR / "user.html"
+    if html_file.exists():
+        with open(html_file, "r", encoding="utf-8") as f:
+            content = f.read()
+            content = content.replace("{{USER_NAME}}", user.name or user.username or "User")
+            content = content.replace("{{USER_ROLE}}", user.role)
+            return content
     return "<h1>User portal template not found.</h1>"
 
 
 @app.get("/admin", response_class=HTMLResponse)
-def admin_portal():
+def admin_portal(request: Request, db: Session = Depends(get_db)):
     """Dedicated Admin Panel: Vobiz wholesale balance, carrier cost ledger, client credit allocation."""
+    user = get_current_user_optional(request, db)
+    if not user:
+        return RedirectResponse(url="/login?next=/admin", status_code=302)
+    if user.role != "admin":
+        return RedirectResponse(url="/", status_code=302)
     html_file = TEMPLATES_DIR / "admin.html"
     if html_file.exists():
         with open(html_file, "r", encoding="utf-8") as f:
-            return f.read()
+            content = f.read()
+            content = content.replace("{{ADMIN_NAME}}", user.name or user.username or "Admin")
+            return content
     return "<h1>Admin portal template not found.</h1>"
 
+
+@app.get("/logout")
+def logout():
+    """Clear session cookie and redirect to login page."""
+    response = RedirectResponse(url="/login", status_code=302)
+    response.delete_cookie(key="vobiz_session_token", path="/")
+    return response
+
+
+# ==========================================
+# AUTHENTICATION API ENDPOINTS
+# ==========================================
+@app.post("/api/auth/login")
+def api_login(data: LoginModel, response: Response, db: Session = Depends(get_db)):
+    uname = data.username.strip()
+    account = db.query(Account).filter(Account.username == uname).first()
+    if not account or not verify_password(data.password, account.password_hash):
+        raise HTTPException(status_code=400, detail="Invalid username or password.")
+    if account.is_active == 0:
+        raise HTTPException(status_code=403, detail="Account is disabled. Contact system administrator.")
+
+    if not account.api_token:
+        account.api_token = generate_api_token()
+        db.commit()
+
+    response.set_cookie(
+        key="vobiz_session_token",
+        value=account.api_token,
+        max_age=30 * 86400,
+        httponly=True,
+        samesite="lax",
+        path="/"
+    )
+    return {
+        "status": "ok",
+        "username": account.username,
+        "name": account.name,
+        "role": account.role,
+        "redirect_url": "/admin" if account.role == "admin" else "/"
+    }
+
+
+@app.post("/api/auth/token-login")
+def api_token_login(data: TokenLoginModel, response: Response, db: Session = Depends(get_db)):
+    tok = data.token.strip()
+    account = db.query(Account).filter(Account.api_token == tok).first()
+    if not account:
+        raise HTTPException(status_code=400, detail="Invalid or unrecognized access token.")
+    if account.is_active == 0:
+        raise HTTPException(status_code=403, detail="Account is disabled. Contact system administrator.")
+
+    response.set_cookie(
+        key="vobiz_session_token",
+        value=account.api_token,
+        max_age=30 * 86400,
+        httponly=True,
+        samesite="lax",
+        path="/"
+    )
+    return {
+        "status": "ok",
+        "username": account.username,
+        "name": account.name,
+        "role": account.role,
+        "redirect_url": "/admin" if account.role == "admin" else "/"
+    }
+
+
+@app.post("/api/auth/logout")
+def api_logout(response: Response):
+    response.delete_cookie(key="vobiz_session_token", path="/")
+    return {"status": "ok", "message": "Logged out successfully"}
+
+
+@app.get("/api/auth/me")
+def api_me(user: Account = Depends(get_current_user)):
+    return {
+        "id": user.id,
+        "username": user.username,
+        "name": user.name,
+        "email": user.email,
+        "role": user.role,
+        "credits": user.credits,
+        "total_calls_made": user.total_calls_made,
+        "api_token": user.api_token
+    }
+
+
+# ==========================================
+# ADMIN USER & TOKEN MANAGEMENT APIS
+# ==========================================
+@app.get("/api/admin/users")
+def list_users(admin: Account = Depends(require_admin), db: Session = Depends(get_db)):
+    users = db.query(Account).order_by(Account.id.asc()).all()
+    return [
+        {
+            "id": u.id,
+            "username": u.username or f"user_{u.id}",
+            "name": u.name,
+            "email": u.email,
+            "role": u.role,
+            "credits": round(float(u.credits), 1),
+            "total_calls_made": u.total_calls_made,
+            "is_active": u.is_active if u.is_active is not None else 1,
+            "api_token": u.api_token or "",
+            "created_at": format_datetime_ist(u.created_at, "%d %b %Y") if u.created_at else ""
+        }
+        for u in users
+    ]
+
+
+@app.post("/api/admin/users")
+def create_user(data: CreateUserModel, admin: Account = Depends(require_admin), db: Session = Depends(get_db)):
+    uname = data.username.strip().lower()
+    if not uname:
+        raise HTTPException(status_code=400, detail="Username is required.")
+    
+    existing = db.query(Account).filter(Account.username == uname).first()
+    if existing:
+        raise HTTPException(status_code=400, detail=f"Username '{uname}' already exists.")
+
+    new_user = Account(
+        name=data.name.strip() or uname.capitalize(),
+        email=data.email.strip() or f"{uname}@example.com",
+        username=uname,
+        password_hash=hash_password(data.password),
+        api_token=generate_api_token(),
+        role=data.role if data.role in ["admin", "client"] else "client",
+        credits=float(data.credits),
+        is_active=1
+    )
+    db.add(new_user)
+    db.commit()
+    db.refresh(new_user)
+    return {
+        "status": "ok",
+        "message": f"User '{new_user.username}' created successfully.",
+        "user": {
+            "id": new_user.id,
+            "username": new_user.username,
+            "name": new_user.name,
+            "role": new_user.role,
+            "credits": new_user.credits,
+            "api_token": new_user.api_token
+        }
+    }
+
+
+@app.post("/api/admin/users/{user_id}/credits")
+def update_user_credits(user_id: int, data: UserCreditUpdateModel, admin: Account = Depends(require_admin), db: Session = Depends(get_db)):
+    target_user = db.query(Account).filter(Account.id == user_id).first()
+    if not target_user:
+        raise HTTPException(status_code=404, detail="User not found.")
+    target_user.credits = float(data.credits)
+    db.commit()
+    return {"status": "ok", "user_id": user_id, "credits": target_user.credits}
+
+
+@app.post("/api/admin/users/{user_id}/toggle-status")
+def toggle_user_status(user_id: int, admin: Account = Depends(require_admin), db: Session = Depends(get_db)):
+    target_user = db.query(Account).filter(Account.id == user_id).first()
+    if not target_user:
+        raise HTTPException(status_code=404, detail="User not found.")
+    if target_user.id == admin.id:
+        raise HTTPException(status_code=400, detail="Cannot disable your own admin account.")
+    target_user.is_active = 0 if target_user.is_active == 1 else 1
+    db.commit()
+    return {"status": "ok", "user_id": user_id, "is_active": target_user.is_active}
+
+
+@app.post("/api/admin/users/{user_id}/reset-password")
+def reset_user_password(user_id: int, data: ResetPasswordModel, admin: Account = Depends(require_admin), db: Session = Depends(get_db)):
+    target_user = db.query(Account).filter(Account.id == user_id).first()
+    if not target_user:
+        raise HTTPException(status_code=404, detail="User not found.")
+    if not data.new_password:
+        raise HTTPException(status_code=400, detail="Password cannot be empty.")
+    target_user.password_hash = hash_password(data.new_password)
+    db.commit()
+    return {"status": "ok", "message": f"Password for '{target_user.username}' reset successfully."}
+
+
+@app.post("/api/admin/users/{user_id}/regenerate-token")
+def regenerate_user_token(user_id: int, admin: Account = Depends(require_admin), db: Session = Depends(get_db)):
+    target_user = db.query(Account).filter(Account.id == user_id).first()
+    if not target_user:
+        raise HTTPException(status_code=404, detail="User not found.")
+    target_user.api_token = generate_api_token()
+    db.commit()
+    return {"status": "ok", "user_id": user_id, "api_token": target_user.api_token}
 
 
 # ==========================================
@@ -94,23 +403,16 @@ async def upload_campaign_file(
     file: UploadFile = File(...),
     course_type: str = "bca_internship",
     language: str = "en",
+    user: Account = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     filename = file.filename or "uploaded_numbers"
     contents = await file.read()
 
-    # Get client account
-    account = db.query(Account).filter(Account.role == "client").first()
-    if not account:
-        account = Account(name="Client Account", role="client", credits=30000)
-        db.add(account)
-        db.commit()
-        db.refresh(account)
-
-    # Create new Campaign
+    # Create new Campaign assigned to the logged-in user
     campaign_name = f"Campaign - {Path(filename).stem} ({datetime.now().strftime('%d %b %H:%M')})"
     campaign = Campaign(
-        account_id=account.id,
+        account_id=user.id,
         name=campaign_name,
         file_name=filename,
         course_type=course_type,
@@ -244,7 +546,20 @@ async def upload_campaign_file(
 # 3. AUTO-DIALER CONTROLS
 # ==========================================
 @app.post("/api/campaign/{campaign_id}/start")
-async def start_campaign(campaign_id: int, request: Request):
+async def start_campaign(
+    campaign_id: int,
+    request: Request,
+    user: Account = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    campaign = db.query(Campaign).filter(Campaign.id == campaign_id).first()
+    if not campaign:
+        raise HTTPException(status_code=404, detail="Campaign not found")
+    if user.role != "admin" and campaign.account_id != user.id:
+        raise HTTPException(status_code=403, detail="Unauthorized access to this campaign")
+    if user.credits < 1.0:
+        raise HTTPException(status_code=400, detail="Insufficient credits. Please contact admin to allocate credits.")
+
     delay = float(request.query_params.get("delay", 0.8))
     course_type = request.query_params.get("course_type", None)
     language = request.query_params.get("language", None)
@@ -262,12 +577,30 @@ async def start_campaign(campaign_id: int, request: Request):
     return res
 
 @app.post("/api/campaign/{campaign_id}/pause")
-def pause_campaign(campaign_id: int):
+def pause_campaign(
+    campaign_id: int,
+    user: Account = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    campaign = db.query(Campaign).filter(Campaign.id == campaign_id).first()
+    if not campaign:
+        raise HTTPException(status_code=404, detail="Campaign not found")
+    if user.role != "admin" and campaign.account_id != user.id:
+        raise HTTPException(status_code=403, detail="Unauthorized")
     res = pause_campaign_dialer(campaign_id)
     return res
 
 @app.post("/api/campaign/{campaign_id}/stop")
-def stop_campaign(campaign_id: int):
+def stop_campaign(
+    campaign_id: int,
+    user: Account = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    campaign = db.query(Campaign).filter(Campaign.id == campaign_id).first()
+    if not campaign:
+        raise HTTPException(status_code=404, detail="Campaign not found")
+    if user.role != "admin" and campaign.account_id != user.id:
+        raise HTTPException(status_code=403, detail="Unauthorized")
     res = stop_campaign_dialer(campaign_id)
     return res
 
@@ -276,10 +609,17 @@ class CampaignConfigModel(BaseModel):
     language: str = "en"
 
 @app.post("/api/campaign/{campaign_id}/config")
-def update_campaign_config(campaign_id: int, config: CampaignConfigModel, db: Session = Depends(get_db)):
+def update_campaign_config(
+    campaign_id: int,
+    config: CampaignConfigModel,
+    user: Account = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
     campaign = db.query(Campaign).filter(Campaign.id == campaign_id).first()
     if not campaign:
         raise HTTPException(status_code=404, detail="Campaign not found")
+    if user.role != "admin" and campaign.account_id != user.id:
+        raise HTTPException(status_code=403, detail="Unauthorized")
     campaign.course_type = config.course_type
     campaign.language = config.language
     db.query(CallRecord).filter(
@@ -297,9 +637,15 @@ def update_campaign_config(campaign_id: int, config: CampaignConfigModel, db: Se
 # 4. CAMPAIGN STATUS & RESPONSE LOGS
 # ==========================================
 @app.get("/api/campaigns")
-def list_campaigns(db: Session = Depends(get_db)):
-    """Returns all campaigns so the frontend can display a campaign switcher or auto-select latest."""
-    campaigns = db.query(Campaign).order_by(Campaign.id.desc()).all()
+def list_campaigns(
+    user: Account = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Returns campaigns belonging to authenticated user (or all if admin)."""
+    if user.role == "admin":
+        campaigns = db.query(Campaign).order_by(Campaign.id.desc()).all()
+    else:
+        campaigns = db.query(Campaign).filter(Campaign.account_id == user.id).order_by(Campaign.id.desc()).all()
     return [
         {
             "id": c.id,
@@ -310,28 +656,53 @@ def list_campaigns(db: Session = Depends(get_db)):
             "total_numbers": c.total_numbers,
             "completed_numbers": c.completed_numbers,
             "status": c.status,
-            "created_at": c.created_at.strftime("%d %b %H:%M") if c.created_at else ""
+            "created_at": format_datetime_ist(c.created_at, "%d %b %I:%M %p") if c.created_at else ""
         }
         for c in campaigns
     ]
 
 
 @app.get("/api/campaign/{campaign_id}/status")
-def get_campaign_status(campaign_id: str, db: Session = Depends(get_db)):
-    account = db.query(Account).filter(Account.role == "client").first()
-    credits_left = account.credits if account else 30000.0
-    total_calls_made = account.total_calls_made if account else 0
+def get_campaign_status(
+    campaign_id: str,
+    user: Account = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    credits_left = user.credits
+    total_calls_made = user.total_calls_made
+
+    # Calculate overall lifetime totals across ALL campaigns for this user/client
+    if user.role == "admin":
+        user_camps = db.query(Campaign.id).all()
+    else:
+        user_camps = db.query(Campaign.id).filter(Campaign.account_id == user.id).all()
+
+    user_camp_ids = [c[0] for c in user_camps]
+
+    if user_camp_ids:
+        overall_calls_q = db.query(CallRecord).filter(CallRecord.campaign_id.in_(user_camp_ids))
+        overall_answered_count = overall_calls_q.filter(CallRecord.status.in_(["answered", "completed"])).count()
+        overall_unanswered_count = overall_calls_q.filter(CallRecord.status.in_(["no-answer", "busy", "failed"])).count()
+        overall_response_count = overall_calls_q.filter(CallRecord.dtmf_digit != "").count()
+        overall_total_calls = overall_calls_q.filter(CallRecord.status.in_(["answered", "completed", "no-answer", "busy", "failed"])).count()
+    else:
+        overall_answered_count = 0
+        overall_unanswered_count = 0
+        overall_response_count = 0
+        overall_total_calls = 0
 
     if campaign_id == "all":
-        # Aggregate view of ALL campaigns
-        all_records = db.query(CallRecord).order_by(CallRecord.id.desc()).all()
+        # Aggregate view of ALL campaigns for this user
+        if user.role == "admin":
+            all_records_q = db.query(CallRecord).order_by(CallRecord.id.desc())
+        else:
+            all_records_q = db.query(CallRecord).filter(CallRecord.campaign_id.in_(user_camp_ids)).order_by(CallRecord.id.desc()) if user_camp_ids else db.query(CallRecord).filter(False)
+
+        all_records = all_records_q.all()
         records = all_records[:200]
         total_records = len(all_records)
-        completed_records = sum(1 for r in all_records if r.status in ["answered", "completed", "failed", "busy", "no-answer"])
-        answered_count = sum(1 for r in all_records if r.status in ["answered", "completed"])
-        response_count = sum(1 for r in all_records if r.dtmf_digit != "")
+        completed_records = overall_total_calls
         total_cost_inr = sum(r.carrier_cost_inr or 0.0 for r in all_records)
-        unanswered_count = sum(1 for r in all_records if r.status in ["no-answer", "busy", "failed"])
 
         return {
             "campaign": {
@@ -344,12 +715,12 @@ def get_campaign_status(campaign_id: str, db: Session = Depends(get_db)):
                 "created_at": "All Time"
             },
             "credits": round(float(credits_left), 2),
-            "total_calls_made": total_calls_made,
+            "total_calls_made": overall_total_calls,
             "total_records": total_records,
             "completed_records": completed_records,
-            "answered_count": answered_count,
-            "unanswered_count": unanswered_count,
-            "response_count": response_count,
+            "answered_count": overall_answered_count,
+            "unanswered_count": overall_unanswered_count,
+            "response_count": overall_response_count,
             "total_cost_inr": round(total_cost_inr, 2),
             "records": [
                 {
@@ -364,7 +735,8 @@ def get_campaign_status(campaign_id: str, db: Session = Depends(get_db)):
                     "duration_sec": r.duration_sec,
                     "carrier_cost_inr": r.carrier_cost_inr,
                     "tokens_used": round(r.tokens_used, 1) if (r.tokens_used and r.tokens_used > 0) else (1.0 if r.status in ["answered", "completed"] else 0.3 if r.status not in ["pending", "dialing"] else 0.0),
-                    "called_at": r.called_at.strftime("%H:%M:%S") if r.called_at else ""
+                    "called_at": format_datetime_ist(r.called_at, "%I:%M:%S %p"),
+                    "called_at_iso": format_datetime_iso(r.called_at)
                 }
                 for r in records
             ]
@@ -373,48 +745,51 @@ def get_campaign_status(campaign_id: str, db: Session = Depends(get_db)):
     # Otherwise fetch specific or latest campaign
     campaign = None
     if campaign_id in ["latest", "0", "", "undefined"]:
-        campaign = db.query(Campaign).order_by(Campaign.id.desc()).first()
+        if user.role == "admin":
+            campaign = db.query(Campaign).order_by(Campaign.id.desc()).first()
+        else:
+            campaign = db.query(Campaign).filter(Campaign.account_id == user.id).order_by(Campaign.id.desc()).first()
     else:
         try:
             cid = int(campaign_id)
-            campaign = db.query(Campaign).filter(Campaign.id == cid).first()
+            if user.role == "admin":
+                campaign = db.query(Campaign).filter(Campaign.id == cid).first()
+            else:
+                campaign = db.query(Campaign).filter(Campaign.id == cid, Campaign.account_id == user.id).first()
         except ValueError:
             campaign = None
 
     if not campaign:
-        campaign = db.query(Campaign).order_by(Campaign.id.desc()).first()
+        if user.role == "admin":
+            campaign = db.query(Campaign).order_by(Campaign.id.desc()).first()
+        else:
+            campaign = db.query(Campaign).filter(Campaign.account_id == user.id).order_by(Campaign.id.desc()).first()
 
     if not campaign:
         return {
             "campaign": None,
-            "credits": 30000.0,
-            "total_calls_made": 0,
+            "credits": round(float(credits_left), 2) if credits_left is not None else 30000.0,
+            "total_calls_made": overall_total_calls,
             "total_records": 0,
             "completed_records": 0,
-            "answered_count": 0,
-            "unanswered_count": 0,
-            "response_count": 0,
+            "answered_count": overall_answered_count,
+            "unanswered_count": overall_unanswered_count,
+            "response_count": overall_response_count,
             "total_cost_inr": 0.0,
             "records": []
         }
 
+    campaign_records_q = db.query(CallRecord).filter(CallRecord.campaign_id == campaign.id)
+    total_records = campaign_records_q.count()
+    completed_records = campaign_records_q.filter(CallRecord.status.in_(["answered", "completed", "failed", "busy", "no-answer"])).count()
+    campaign_cost_inr = sum(r.carrier_cost_inr or 0.0 for r in campaign_records_q.all())
+
     records = (
-        db.query(CallRecord)
-        .filter(CallRecord.campaign_id == campaign.id)
+        campaign_records_q
         .order_by(CallRecord.id.desc())
         .limit(200)
         .all()
     )
-
-    all_records_query = db.query(CallRecord).filter(CallRecord.campaign_id == campaign.id)
-    total_records = all_records_query.count()
-    completed_records = all_records_query.filter(CallRecord.status.in_(["answered", "completed", "failed", "busy", "no-answer"])).count()
-    answered_count = all_records_query.filter(CallRecord.status.in_(["answered", "completed"])).count()
-    response_count = all_records_query.filter(CallRecord.dtmf_digit != "").count()
-
-    all_records = all_records_query.all()
-    total_cost_inr = sum(r.carrier_cost_inr or 0.0 for r in all_records)
-    unanswered_count = sum(1 for r in all_records if r.status in ["no-answer", "busy", "failed"])
 
     return {
         "campaign": {
@@ -424,16 +799,16 @@ def get_campaign_status(campaign_id: str, db: Session = Depends(get_db)):
             "course_type": campaign.course_type or "bca_internship",
             "language": campaign.language or "en",
             "file_name": campaign.file_name,
-            "created_at": campaign.created_at.strftime("%Y-%m-%d %H:%M") if campaign.created_at else ""
+            "created_at": format_datetime_ist(campaign.created_at, "%d %b %Y, %I:%M %p") if campaign.created_at else ""
         },
         "credits": round(float(credits_left), 2) if credits_left is not None else 30000.0,
-        "total_calls_made": total_calls_made,
-        "total_records": total_records,
-        "completed_records": completed_records,
-        "answered_count": answered_count,
-        "unanswered_count": unanswered_count,
-        "response_count": response_count,
-        "total_cost_inr": round(total_cost_inr, 2),
+        "total_calls_made": overall_total_calls,
+        "total_records": total_records,  # Variable based on active spreadsheet
+        "completed_records": completed_records,  # Progress of active spreadsheet
+        "answered_count": overall_answered_count,  # Total calls answered across all sheets
+        "unanswered_count": overall_unanswered_count,  # Total calls unanswered across all sheets
+        "response_count": overall_response_count,  # Total responses captured across all sheets
+        "total_cost_inr": round(campaign_cost_inr, 2),
         "records": [
             {
                 "id": r.id,
@@ -447,7 +822,8 @@ def get_campaign_status(campaign_id: str, db: Session = Depends(get_db)):
                 "duration_sec": r.duration_sec,
                 "carrier_cost_inr": r.carrier_cost_inr,
                 "tokens_used": round(r.tokens_used, 1) if (r.tokens_used and r.tokens_used > 0) else (1.0 if r.status in ["answered", "completed"] else 0.3 if r.status not in ["pending", "dialing"] else 0.0),
-                "called_at": r.called_at.strftime("%H:%M:%S") if r.called_at else ""
+                "called_at": format_datetime_ist(r.called_at, "%I:%M:%S %p"),
+                "called_at_iso": format_datetime_iso(r.called_at)
             }
             for r in records
         ]
@@ -458,12 +834,22 @@ def get_campaign_status(campaign_id: str, db: Session = Depends(get_db)):
 # 5. EXPORT ANNOTATED RESPONSES TO EXCEL (.xlsx)
 # ==========================================
 @app.get("/api/campaign/{campaign_id}/export-excel")
-def export_campaign_excel(campaign_id: str, db: Session = Depends(get_db)):
+def export_campaign_excel(
+    campaign_id: str,
+    user: Account = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
     if campaign_id == "all":
-        records = db.query(CallRecord).order_by(CallRecord.id.desc()).all()
+        if user.role == "admin":
+            records = db.query(CallRecord).order_by(CallRecord.id.desc()).all()
+        else:
+            records = db.query(CallRecord).join(Campaign).filter(Campaign.account_id == user.id).order_by(CallRecord.id.desc()).all()
         file_label = "all_campaigns"
     elif campaign_id in ["latest", "0", ""]:
-        campaign = db.query(Campaign).order_by(Campaign.id.desc()).first()
+        if user.role == "admin":
+            campaign = db.query(Campaign).order_by(Campaign.id.desc()).first()
+        else:
+            campaign = db.query(Campaign).filter(Campaign.account_id == user.id).order_by(Campaign.id.desc()).first()
         if not campaign:
             raise HTTPException(status_code=404, detail="No campaigns found")
         records = db.query(CallRecord).filter(CallRecord.campaign_id == campaign.id).order_by(CallRecord.id.asc()).all()
@@ -475,9 +861,9 @@ def export_campaign_excel(campaign_id: str, db: Session = Depends(get_db)):
         except ValueError:
             campaign = None
         if not campaign:
-            campaign = db.query(Campaign).order_by(Campaign.id.desc()).first()
-        if not campaign:
             raise HTTPException(status_code=404, detail="Campaign not found")
+        if user.role != "admin" and campaign.account_id != user.id:
+            raise HTTPException(status_code=403, detail="Unauthorized access to this campaign export")
         records = db.query(CallRecord).filter(CallRecord.campaign_id == campaign.id).order_by(CallRecord.id.asc()).all()
         file_label = f"campaign_{campaign.id}"
 
@@ -537,7 +923,7 @@ def export_campaign_excel(campaign_id: str, db: Session = Depends(get_db)):
             r.duration_sec,
             round(r.carrier_cost_inr, 2),
             r.vobiz_call_uuid or "—",
-            r.called_at.strftime("%Y-%m-%d %H:%M:%S") if r.called_at else "—"
+            format_datetime_ist(r.called_at, "%Y-%m-%d %I:%M:%S %p") if r.called_at else "—"
         ])
 
     # Auto column width
@@ -567,7 +953,7 @@ def vobiz_account_info():
     return info
 
 @app.post("/api/account/credits")
-def update_credits(data: CreditUpdateModel, db: Session = Depends(get_db)):
+def update_credits(data: CreditUpdateModel, admin: Account = Depends(require_admin), db: Session = Depends(get_db)):
     account = db.query(Account).filter(Account.role == "client").first()
     if account:
         account.credits = data.credits
@@ -576,7 +962,7 @@ def update_credits(data: CreditUpdateModel, db: Session = Depends(get_db)):
     return {"status": "error", "message": "Account not found"}
 
 @app.post("/api/account/credits/add")
-def add_credits(data: CreditAddModel, db: Session = Depends(get_db)):
+def add_credits(data: CreditAddModel, admin: Account = Depends(require_admin), db: Session = Depends(get_db)):
     account = db.query(Account).filter(Account.role == "client").first()
     if account:
         account.credits += data.amount
